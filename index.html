@@ -380,6 +380,86 @@ const PT_TABLE = {
 const PT_MONTHLY_NOTE = {
   "Maharashtra": "₹200/month (Feb ₹300) — special monthly stepping applies."
 };
+
+/* ============== STATE LWF (Labour Welfare Fund) LOOKUP ==============
+   Source of truth: uploaded "Labour Welfare Fund (LWF) — State-wise Employer /
+   Employee Contribution Rates" sheet. Values are per-deduction-cycle amounts
+   (i.e. the amount actually deducted each time LWF falls due), not monthly
+   equivalents — the frequency field controls how often that deduction happens.
+   States not present in this table are treated as "LWF Not Applicable". */
+const LWF_TABLE = {
+  "Andhra Pradesh": { employee: 30, employer: 70, frequency: "Annual" },
+  "Chhattisgarh": { employee: 15, employer: 45, frequency: "Half-Yearly" },
+  "Delhi": { employee: 0.75, employer: 2.25, frequency: "Half-Yearly" },
+  "Goa": { employee: 60, employer: 180, frequency: "Half-Yearly" },
+  "Gujarat": { employee: 6, employer: 12, frequency: "Half-Yearly" },
+  "Haryana": { type: "percent", employeeRate: 0.002, employeeCap: 35, employerMultiplier: 2, employerCap: 70, frequency: "Monthly" },
+  "Karnataka": { employee: 50, employer: 100, frequency: "Annual" },
+  "Kerala": { employee: 50, employer: 50, frequency: "Monthly" },
+  "Madhya Pradesh": { employee: 10, employer: 30, frequency: "Half-Yearly" },
+  "Maharashtra": { employee: 25, employer: 75, frequency: "Half-Yearly" },
+  "Odisha": { employee: 20, employer: 40, frequency: "Half-Yearly" },
+  "Punjab": { employee: 5, employer: 20, frequency: "Monthly" },
+  "Tamil Nadu": { employee: 20, employer: 40, frequency: "Annual" },
+  "Telangana": { employee: 2, employer: 5, frequency: "Annual" },
+  "West Bengal": { employee: 3, employer: 30, frequency: "Half-Yearly" }
+};
+const LWF_TOOLTIP_TEXT = "Labour Welfare Fund (LWF) is a statutory contribution applicable in selected Indian states. Contribution amount and deduction frequency vary by state.";
+const LWF_DEDUCTIONS_PER_YEAR = {
+  "Monthly": 12,
+  "Half-Yearly": 2,
+  "Annual": 1
+};
+
+/* computeLWF — dedicated LWF calculation module, reused by both the CTC
+   calculator and the Manual calculator so the logic (and the source-of-truth
+   table) is never duplicated.
+   - When lwfOn is false: LWF is fully switched off (₹0 everywhere).
+   - When the selected state has no entry in LWF_TABLE: "Not Applicable".
+   - Monthly-frequency states deduct every month (currentDeduction = per-cycle amount).
+   - Half-Yearly / Annual states show ₹0 as the *monthly salary* deduction
+     (so Net Salary / Employer Cost for an arbitrary month aren't distorted)
+     while still surfacing the correct annual liability for reporting. */
+function computeLWF(stateName, lwfOn, grossMonthly) {
+  const entry = LWF_TABLE[stateName];
+  const applicable = !!entry;
+  if (!lwfOn || !applicable) {
+    return {
+      lwfOn: !!lwfOn,
+      lwfApplicable: applicable,
+      lwfFrequency: entry ? entry.frequency : null,
+      lwfEmployeePerCycle: 0,
+      lwfEmployerPerCycle: 0,
+      lwfEmployeeMonthly: 0,
+      lwfEmployerMonthly: 0,
+      lwfEmployeeAnnual: 0,
+      lwfEmployerAnnual: 0
+    };
+  }
+  let employeePerCycle, employerPerCycle;
+  if (entry.type === 'percent') {
+    employeePerCycle = Math.min((grossMonthly || 0) * entry.employeeRate, entry.employeeCap);
+    employerPerCycle = Math.min(employeePerCycle * entry.employerMultiplier, entry.employerCap);
+  } else {
+    employeePerCycle = entry.employee;
+    employerPerCycle = entry.employer;
+  }
+  const cyclesPerYear = LWF_DEDUCTIONS_PER_YEAR[entry.frequency] || 1;
+  const employeeAnnual = employeePerCycle * cyclesPerYear;
+  const employerAnnual = employerPerCycle * cyclesPerYear;
+  const isMonthly = entry.frequency === 'Monthly';
+  return {
+    lwfOn: true,
+    lwfApplicable: true,
+    lwfFrequency: entry.frequency,
+    lwfEmployeePerCycle: employeePerCycle,
+    lwfEmployerPerCycle: employerPerCycle,
+    lwfEmployeeMonthly: isMonthly ? employeePerCycle : 0,
+    lwfEmployerMonthly: isMonthly ? employerPerCycle : 0,
+    lwfEmployeeAnnual: employeeAnnual,
+    lwfEmployerAnnual: employerAnnual
+  };
+}
 function formatNumber(n) {
   return Math.round(n).toLocaleString('en-IN');
 }
@@ -393,6 +473,10 @@ function buildSalarySummaryText(result, meta) {
     'Total Employee Deductions: ' + formatCurrency(result.totalEmployeeDeductions),
     'Employer Cost Add-on: ' + formatCurrency(result.employerAddOn),
     'In-Hand % of CTC: ' + result.inHandPct.toFixed(1) + '%',
+    '',
+    result.lwfOn && result.lwfApplicable ? ('Labour Welfare Fund (Employee): ' + formatCurrency(result.lwfEmployeeMonthly) + '/mo · ' + formatCurrency(result.lwfEmployeeAnnual) + '/yr (' + result.lwfFrequency + ')') : '',
+    result.lwfOn && result.lwfApplicable ? ('Labour Welfare Fund (Employer): ' + formatCurrency(result.lwfEmployerMonthly) + '/mo · ' + formatCurrency(result.lwfEmployerAnnual) + '/yr (' + result.lwfFrequency + ')') : '',
+    result.lwfOn && !result.lwfApplicable ? 'Labour Welfare Fund: Not Applicable in this State' : '',
     '',
     'Generated via Salary Analyzer'
   ];
@@ -438,7 +522,8 @@ function computeStructure(inputs) {
     gratuityOn,
     esicOn,
     bonusOn,
-    bonusPct
+    bonusPct,
+    lwfOn
   } = inputs;
   const ctcMonthly = mode === 'annual' ? ctcRaw / 12 : ctcRaw;
   const basic = ctcMonthly * (basicPct / 100);
@@ -476,15 +561,16 @@ function computeStructure(inputs) {
   }
   const ptAnnual = PT_TABLE[stateName] || 0;
   const ptMonthly = ptAnnual / 12;
-  const totalEmployeeDeductions = employeePF + employeeESIC + ptMonthly;
+  const lwf = computeLWF(stateName, lwfOn, gross);
+  const totalEmployeeDeductions = employeePF + employeeESIC + ptMonthly + lwf.lwfEmployeeMonthly;
   const netInHand = gross - totalEmployeeDeductions;
-  const employerAddOn = employerPF + employerESIC + gratuity;
+  const employerAddOn = employerPF + employerESIC + gratuity + lwf.lwfEmployerMonthly;
   const inHandPct = ctcMonthly > 0 ? netInHand / ctcMonthly * 100 : 0;
   const epfSplitEPF = pfOn ? pfBasis * 0.0367 : 0;
   const epfSplitEPS = pfOn ? pfBasis * 0.0833 : 0;
   const epfAdmin = pfOn && employerPFPct > 12 ? pfBasis * ((employerPFPct - 12) / 100) : 0;
   const employerAddOnWithBonus = employerAddOn + bonusMonthly;
-  const netInHandAnnual = netInHand * 12 + bonusAnnual;
+  const netInHandAnnual = netInHand * 12 + bonusAnnual - lwf.lwfEmployeeMonthly * 12 + lwf.lwfEmployeeAnnual;
   return {
     ctcMonthly,
     basic,
@@ -514,7 +600,8 @@ function computeStructure(inputs) {
     bonusWage,
     bonusPct: clampedBonusPct,
     bonusAnnual,
-    bonusMonthly
+    bonusMonthly,
+    ...lwf
   };
 }
 
@@ -549,7 +636,8 @@ function computeManual(inputs) {
     ptOn,
     ptMode,
     ptState,
-    ptManual
+    ptManual,
+    lwfOn
   } = inputs;
   const gross = (basic || 0) + (hra || 0) + (conveyance || 0) + (medical || 0) + (special || 0);
   let employerPF = 0,
@@ -601,11 +689,12 @@ function computeManual(inputs) {
       ptMonthly = ptAnnual / 12;
     }
   }
-  const totalEmployeeDeductions = employeePF + employeeESIC + ptMonthly;
+  const lwf = computeLWF(ptState, lwfOn, gross);
+  const totalEmployeeDeductions = employeePF + employeeESIC + ptMonthly + lwf.lwfEmployeeMonthly;
   const netInHand = gross - totalEmployeeDeductions;
-  const netInHandAnnual = netInHand * 12 + bonusAnnual;
-  const employerAddOn = employerPF + employerESIC + gratuity + bonusMonthly;
-  const ctcMonthly = gross + employerPF + employerESIC + gratuity + bonusMonthly;
+  const netInHandAnnual = netInHand * 12 + bonusAnnual - lwf.lwfEmployeeMonthly * 12 + lwf.lwfEmployeeAnnual;
+  const employerAddOn = employerPF + employerESIC + gratuity + bonusMonthly + lwf.lwfEmployerMonthly;
+  const ctcMonthly = gross + employerPF + employerESIC + gratuity + bonusMonthly + lwf.lwfEmployerMonthly;
   const inHandPct = ctcMonthly > 0 ? netInHand / ctcMonthly * 100 : 0;
   return {
     gross,
@@ -629,7 +718,8 @@ function computeManual(inputs) {
     netInHandAnnual,
     employerAddOn,
     ctcMonthly,
-    inHandPct
+    inHandPct,
+    ...lwf
   };
 }
 
@@ -706,7 +796,14 @@ function computeIncomeTax({
 function buildReportRows(r, meta) {
   const rows = [[meta.title, "Powered by Salary Analyzer · Designed & Developed by Harsh Agarwal"], [], ["Section", "Component", "Monthly (₹)", "Annual (₹)"], ["A - Employer Cost", "Cost to Company (CTC)", Math.round(r.ctcMonthly), Math.round(r.ctcMonthly * 12)], ["A - Employer Cost", "Basic Salary", Math.round(r.basic), Math.round(r.basic * 12)], ["A - Employer Cost", "HRA", Math.round(r.hra), Math.round(r.hra * 12)], ["A - Employer Cost", "Conveyance Allowance", Math.round(r.conveyance), Math.round(r.conveyance * 12)], ["A - Employer Cost", "Special Allowance", Math.round(r.special), Math.round(r.special * 12)], ["A - Employer Cost", meta.pfLabel, Math.round(r.employerPF), Math.round(r.employerPF * 12)], ["A - Employer Cost", "Employer ESIC", Math.round(r.employerESIC), Math.round(r.employerESIC * 12)], ["A - Employer Cost", "Gratuity", Math.round(r.gratuity), Math.round(r.gratuity * 12)], ["A - Employer Cost", meta.bonusLabel, Math.round(r.bonusMonthly), Math.round(r.bonusAnnual)], ["B - Gross Salary", "Basic Salary", Math.round(r.basic), Math.round(r.basic * 12)], ["B - Gross Salary", "HRA", Math.round(r.hra), Math.round(r.hra * 12)], ["B - Gross Salary", "Conveyance Allowance", Math.round(r.conveyance), Math.round(r.conveyance * 12)]];
   if (r.medical) rows.push(["B - Gross Salary", "Medical Allowance", Math.round(r.medical), Math.round(r.medical * 12)]);
-  rows.push(["B - Gross Salary", "Special / Other Allowance", Math.round(r.special), Math.round(r.special * 12)], ["B - Gross Salary", "Gross Salary", Math.round(r.gross), Math.round(r.gross * 12)], ["C - Deductions", meta.employeePfLabel, Math.round(r.employeePF), Math.round(r.employeePF * 12)], ["C - Deductions", "Employee ESIC", Math.round(r.employeeESIC), Math.round(r.employeeESIC * 12)], ["C - Deductions", "Professional Tax", Math.round(r.ptMonthly), Math.round(r.ptAnnual)], ["C - Deductions", "Total Deductions", Math.round(r.totalEmployeeDeductions), Math.round(r.totalEmployeeDeductions * 12)], ["D - Net", "Net In-Hand Salary (incl. Bonus in Annual)", Math.round(r.netInHand), Math.round(r.netInHandAnnual)]);
+  rows.push(["B - Gross Salary", "Special / Other Allowance", Math.round(r.special), Math.round(r.special * 12)], ["B - Gross Salary", "Gross Salary", Math.round(r.gross), Math.round(r.gross * 12)], ["C - Deductions", meta.employeePfLabel, Math.round(r.employeePF), Math.round(r.employeePF * 12)], ["C - Deductions", "Employee ESIC", Math.round(r.employeeESIC), Math.round(r.employeeESIC * 12)], ["C - Deductions", "Professional Tax", Math.round(r.ptMonthly), Math.round(r.ptAnnual)]);
+  if (r.lwfOn && r.lwfApplicable) {
+    rows.push(["A - Employer Cost", "Labour Welfare Fund (Employer) — " + r.lwfFrequency, Math.round(r.lwfEmployerMonthly), Math.round(r.lwfEmployerAnnual)]);
+    rows.push(["C - Deductions", "Labour Welfare Fund (Employee) — " + r.lwfFrequency, Math.round(r.lwfEmployeeMonthly), Math.round(r.lwfEmployeeAnnual)]);
+  } else if (r.lwfOn && !r.lwfApplicable) {
+    rows.push(["C - Deductions", "Labour Welfare Fund — Not Applicable in this State", 0, 0]);
+  }
+  rows.push(["C - Deductions", "Total Deductions", Math.round(r.totalEmployeeDeductions), Math.round(r.totalEmployeeDeductions * 12)], ["D - Net", "Net In-Hand Salary (incl. Bonus in Annual)", Math.round(r.netInHand), Math.round(r.netInHandAnnual)]);
   return rows;
 }
 function buildReportHTML(r, meta) {
@@ -750,9 +847,12 @@ function buildReportHTML(r, meta) {
         <tr><td>Employer ESIC</td><td>${formatNumber(r.employerESIC)}</td><td>${formatNumber(r.employerESIC * 12)}</td></tr>
         <tr><td>Gratuity</td><td>${formatNumber(r.gratuity)}</td><td>${formatNumber(r.gratuity * 12)}</td></tr>
         <tr><td>${meta.bonusLabel}</td><td>${formatNumber(r.bonusMonthly)}</td><td>${formatNumber(r.bonusAnnual)}</td></tr>
+        ${r.lwfOn && r.lwfApplicable ? `<tr><td>Labour Welfare Fund (Employer) — ${r.lwfFrequency}</td><td>${formatNumber(r.lwfEmployerMonthly)}</td><td>${formatNumber(r.lwfEmployerAnnual)}</td></tr>` : ''}
         <tr><td>${meta.employeePfLabel} (Deduction)</td><td>-${formatNumber(r.employeePF)}</td><td>-${formatNumber(r.employeePF * 12)}</td></tr>
         <tr><td>Employee ESIC (Deduction)</td><td>-${formatNumber(r.employeeESIC)}</td><td>-${formatNumber(r.employeeESIC * 12)}</td></tr>
         <tr><td>Professional Tax (Deduction)</td><td>-${formatNumber(r.ptMonthly)}</td><td>-${formatNumber(r.ptAnnual)}</td></tr>
+        ${r.lwfOn && r.lwfApplicable ? `<tr><td>Labour Welfare Fund (Employee) — ${r.lwfFrequency} (Deduction)</td><td>-${formatNumber(r.lwfEmployeeMonthly)}</td><td>-${formatNumber(r.lwfEmployeeAnnual)}</td></tr>` : ''}
+        ${r.lwfOn && !r.lwfApplicable ? `<tr><td colspan="3">Labour Welfare Fund: Not Applicable in this State</td></tr>` : ''}
         <tr><td><b>NET IN-HAND SALARY</b></td><td><b>${formatNumber(r.netInHand)}</b></td><td><b>${formatNumber(r.netInHandAnnual)}</b></td></tr>
         <tr><td colspan="3" style="font-size:10px;color:#777;">Annual figure includes the statutory bonus payout in addition to 12 months of net salary.</td></tr>
       </table>
@@ -770,7 +870,12 @@ function buildReportHTML(r, meta) {
 function buildReportText(r, meta) {
   let lines = [meta.title, `Powered by Salary Analyzer · Designed & Developed by Harsh Agarwal · ${meta.subtitle}`, '', `Cost to Company (CTC): ${formatCurrency(r.ctcMonthly)}/mo | ${formatCurrency(r.ctcMonthly * 12)}/yr`, `Basic Salary: ${formatCurrency(r.basic)}/mo`, `HRA: ${formatCurrency(r.hra)}/mo`, `Conveyance: ${formatCurrency(r.conveyance)}/mo`];
   if (r.medical) lines.push(`Medical Allowance: ${formatCurrency(r.medical)}/mo`);
-  lines.push(`Special Allowance: ${formatCurrency(r.special)}/mo`, `Gross Salary: ${formatCurrency(r.gross)}/mo`, '', `${meta.pfLabel}: ${formatCurrency(r.employerPF)}/mo`, `Employer ESIC: ${formatCurrency(r.employerESIC)}/mo`, `Gratuity: ${formatCurrency(r.gratuity)}/mo`, `${meta.bonusLabel}: ${formatCurrency(r.bonusAnnual)}/yr`, '', `${meta.employeePfLabel} (Deduction): -${formatCurrency(r.employeePF)}/mo`, `Employee ESIC (Deduction): -${formatCurrency(r.employeeESIC)}/mo`, `Professional Tax (Deduction): -${formatCurrency(r.ptMonthly)}/mo`, '', `NET IN-HAND SALARY: ${formatCurrency(r.netInHand)}/mo | ${formatCurrency(r.netInHandAnnual)}/yr`);
+  lines.push(`Special Allowance: ${formatCurrency(r.special)}/mo`, `Gross Salary: ${formatCurrency(r.gross)}/mo`, '', `${meta.pfLabel}: ${formatCurrency(r.employerPF)}/mo`, `Employer ESIC: ${formatCurrency(r.employerESIC)}/mo`, `Gratuity: ${formatCurrency(r.gratuity)}/mo`, `${meta.bonusLabel}: ${formatCurrency(r.bonusAnnual)}/yr`);
+  if (r.lwfOn && r.lwfApplicable) lines.push(`Labour Welfare Fund (Employer) — ${r.lwfFrequency}: ${formatCurrency(r.lwfEmployerMonthly)}/mo | ${formatCurrency(r.lwfEmployerAnnual)}/yr`);
+  lines.push('', `${meta.employeePfLabel} (Deduction): -${formatCurrency(r.employeePF)}/mo`, `Employee ESIC (Deduction): -${formatCurrency(r.employeeESIC)}/mo`, `Professional Tax (Deduction): -${formatCurrency(r.ptMonthly)}/mo`);
+  if (r.lwfOn && r.lwfApplicable) lines.push(`Labour Welfare Fund (Employee) — ${r.lwfFrequency} (Deduction): -${formatCurrency(r.lwfEmployeeMonthly)}/mo | -${formatCurrency(r.lwfEmployeeAnnual)}/yr`);
+  if (r.lwfOn && !r.lwfApplicable) lines.push(`Labour Welfare Fund: Not Applicable in this State`);
+  lines.push('', `NET IN-HAND SALARY: ${formatCurrency(r.netInHand)}/mo | ${formatCurrency(r.netInHandAnnual)}/yr`);
   return lines.join('\n');
 }
 function downloadExcelReport(r, meta, filename) {
@@ -980,6 +1085,101 @@ function DashboardCards({
     key: i,
     index: i,
     ...c
+  })));
+}
+
+/* ============== DEDICATED LWF (Labour Welfare Fund) CARD ==============
+   Surfaces the state-wise LWF figures from computeLWF() as their own card,
+   mirroring the visual language of IncomeTaxCard / DashboardCards. */
+function LWFStat({
+  label,
+  value
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-b tracking-wide uppercase mb-1",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    className: "num txt-sh font-semibold",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, value));
+}
+function LWFCard({
+  result
+}) {
+  const on = result.lwfOn;
+  const applicable = result.lwfApplicable;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6 lg:p-8 anim-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h flex items-center gap-1.5",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Labour Welfare Fund", /*#__PURE__*/React.createElement("span", {
+    title: LWF_TOOLTIP_TEXT,
+    style: {
+      cursor: 'help',
+      color: 'var(--ink-faint)',
+      fontSize: '11px',
+      border: '1px solid var(--line)',
+      borderRadius: '999px',
+      width: '15px',
+      height: '15px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, "i")), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: !on ? {
+      color: 'var(--ink-faint)'
+    } : !applicable ? {
+      color: 'var(--rose)'
+    } : {
+      color: 'var(--emerald)'
+    }
+  }, !on ? "Disabled" : !applicable ? "Not Applicable" : "Enabled")), !on ? /*#__PURE__*/React.createElement("p", {
+    className: "txt-b",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "LWF is currently switched off. Turn on the Labour Welfare Fund toggle above to see state-wise contribution details.") : !applicable ? /*#__PURE__*/React.createElement("p", {
+    className: "txt-b",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "LWF Not Applicable in this State") : /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 sm:grid-cols-3 gap-3"
+  }, /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Employee Contribution",
+    value: formatCurrency(result.lwfEmployeePerCycle) + " / cycle"
+  }), /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Employer Contribution",
+    value: formatCurrency(result.lwfEmployerPerCycle) + " / cycle"
+  }), /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Deduction Frequency",
+    value: result.lwfFrequency
+  }), /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Monthly Deduction (Employee)",
+    value: formatCurrency(result.lwfEmployeeMonthly)
+  }), /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Annual Deduction (Employee)",
+    value: formatCurrency(result.lwfEmployeeAnnual)
+  }), /*#__PURE__*/React.createElement(LWFStat, {
+    label: "Annual Deduction (Employer)",
+    value: formatCurrency(result.lwfEmployerAnnual)
   })));
 }
 
@@ -2344,6 +2544,7 @@ function App() {
   const [esicOn, setEsicOn] = useState(true);
   const [bonusOn, setBonusOn] = useState(true);
   const [bonusPct, setBonusPct] = useState(8.33);
+  const [lwfOn, setLwfOn] = useState(false);
   const [rentPaid, setRentPaid] = useState(0);
   const [inv80C, setInv80C] = useState(0);
   const [inv80D, setInv80D] = useState(0);
@@ -2451,6 +2652,7 @@ function App() {
   const [mPtMode, setMPtMode] = useState('auto');
   const [mPtState, setMPtState] = useState('Maharashtra');
   const [mPtManual, setMPtManual] = useState(200);
+  const [mLwfOn, setMLwfOn] = useState(false);
   const [mRentPaid, setMRentPaid] = useState(0);
   const [mCityType, setMCityType] = useState('metro');
   const [mInv80C, setMInv80C] = useState(0);
@@ -2482,8 +2684,9 @@ function App() {
     gratuityOn,
     esicOn,
     bonusOn,
-    bonusPct
-  }), [ctcRaw, mode, basicPct, hraPct, conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn, bonusOn, bonusPct]);
+    bonusPct,
+    lwfOn
+  }), [ctcRaw, mode, basicPct, hraPct, conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn, bonusOn, bonusPct, lwfOn]);
   const netDisplay = result.netInHand;
   const animatedNet = useCountUp(netDisplay, 800);
   const taxResult = useMemo(() => computeIncomeTax({
@@ -2521,8 +2724,9 @@ function App() {
     ptOn: mPtOn,
     ptMode: mPtMode,
     ptState: mPtState,
-    ptManual: mPtManual
-  }), [mBasic, mHra, mConveyance, mMedical, mSpecial, mPfOn, mPfMode, mPfBasisMode, mPfEmployerManual, mPfEmployeeManual, mEsicOn, mEsicMode, mEsicEmployerManual, mEsicEmployeeManual, mGratuityOn, mGratuityMode, mGratuityManual, mBonusOn, mBonusMode, mBonusPct, mBonusManualAnnual, mPtOn, mPtMode, mPtState, mPtManual]);
+    ptManual: mPtManual,
+    lwfOn: mLwfOn
+  }), [mBasic, mHra, mConveyance, mMedical, mSpecial, mPfOn, mPfMode, mPfBasisMode, mPfEmployerManual, mPfEmployeeManual, mEsicOn, mEsicMode, mEsicEmployerManual, mEsicEmployeeManual, mGratuityOn, mGratuityMode, mGratuityManual, mBonusOn, mBonusMode, mBonusPct, mBonusManualAnnual, mPtOn, mPtMode, mPtState, mPtManual, mLwfOn]);
   const mNetDisplay = mTab === 'monthly' ? mResult.netInHand : mResult.netInHandAnnual;
   const mAnimatedNet = useCountUp(mNetDisplay, 700);
   const mTaxResult = useMemo(() => computeIncomeTax({
@@ -2898,6 +3102,11 @@ function App() {
       monthly: mResult.ptMonthly,
       annual: mResult.ptAnnual,
       tab: "monthly"
+    }), mResult.lwfOn && mResult.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+      label: "Labour Welfare Fund (Employee) — " + mResult.lwfFrequency,
+      monthly: mResult.lwfEmployeeMonthly,
+      annual: mResult.lwfEmployeeAnnual,
+      tab: "monthly"
     }), /*#__PURE__*/React.createElement(Row, {
       label: "Total Deductions",
       monthly: mResult.totalEmployeeDeductions,
@@ -2920,6 +3129,11 @@ function App() {
       label: "Gratuity",
       monthly: mResult.gratuity,
       annual: mResult.gratuity * 12,
+      tab: "monthly"
+    }), mResult.lwfOn && mResult.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+      label: "Labour Welfare Fund (Employer) — " + mResult.lwfFrequency,
+      monthly: mResult.lwfEmployerMonthly,
+      annual: mResult.lwfEmployerAnnual,
       tab: "monthly"
     }), /*#__PURE__*/React.createElement(Row, {
       label: "Statutory Bonus",
@@ -3276,7 +3490,60 @@ function App() {
       onChange: e => setMPtManual(parseFloat(e.target.value) || 0),
       onKeyDown: blockInvalidNumberKeys,
       onWheel: blurOnWheel
-    }))))), /*#__PURE__*/React.createElement("section", {
+    }))), /*#__PURE__*/React.createElement("div", {
+      className: "rounded-xl p-4 mb-1",
+      style: {
+        background: 'var(--input-bg)',
+        border: '1px solid var(--line)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-between gap-3 mb-1"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "min-w-0"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "txt-sh font-medium flex items-center gap-1.5",
+      style: {
+        color: 'var(--ink)'
+      }
+    }, "Labour Welfare Fund (LWF)", /*#__PURE__*/React.createElement("span", {
+      title: LWF_TOOLTIP_TEXT,
+      style: {
+        cursor: 'help',
+        color: 'var(--ink-faint)',
+        fontSize: '11px',
+        border: '1px solid var(--line)',
+        borderRadius: '999px',
+        width: '15px',
+        height: '15px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }
+    }, "i")), /*#__PURE__*/React.createElement("div", {
+      className: "txt-b mt-0.5",
+      style: {
+        color: 'var(--ink-faint)'
+      }
+    }, LWF_TABLE[mPtState] ? ("State-wise statutory contribution (" + LWF_TABLE[mPtState].frequency + ")") : "LWF Not Applicable in this State")), /*#__PURE__*/React.createElement("div", {
+      className: "toggle " + (mLwfOn ? 'on' : ''),
+      onClick: () => setMLwfOn(!mLwfOn),
+      onKeyDown: e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setMLwfOn(!mLwfOn);
+        }
+      },
+      role: "switch",
+      "aria-checked": mLwfOn,
+      tabIndex: 0
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "knob"
+    }))), mLwfOn && LWF_TABLE[mPtState] && /*#__PURE__*/React.createElement("p", {
+      className: "txt-b mt-2",
+      style: {
+        color: 'var(--ink-faint)'
+      }
+    }, LWF_TABLE[mPtState].type === 'percent' ? ("Employee 0.2% of wages (max ₹" + LWF_TABLE[mPtState].employeeCap + "/mo) · Employer 2× employee (max ₹" + LWF_TABLE[mPtState].employerCap + "/mo).") : ("Employee ₹" + LWF_TABLE[mPtState].employee + " · Employer ₹" + LWF_TABLE[mPtState].employer + " per " + LWF_TABLE[mPtState].frequency.toLowerCase() + " cycle. Uses the state selected for Professional Tax."))))), /*#__PURE__*/React.createElement("section", {
       className: "space-y-7"
     }, !mHasCalculated ? /*#__PURE__*/React.createElement(HeroCTA, {
       onCalculate: handleCalculateManual,
@@ -3448,6 +3715,8 @@ function App() {
       result: mResult,
       tab: "monthly",
       monthlyTDS: mTaxResult[mTaxResult.betterRegime].monthlyTDS
+    }), /*#__PURE__*/React.createElement(LWFCard, {
+      result: mResult
     }), /*#__PURE__*/React.createElement("div", {
       className: "grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch"
     }, /*#__PURE__*/React.createElement(SalaryHealthScore, {
@@ -3878,6 +4147,56 @@ function App() {
   }))), /*#__PURE__*/React.createElement("div", {
     className: "divider my-5"
   }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium flex items-center gap-1.5",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Labour Welfare Fund (LWF)", /*#__PURE__*/React.createElement("span", {
+    title: LWF_TOOLTIP_TEXT,
+    style: {
+      cursor: 'help',
+      color: 'var(--ink-faint)',
+      fontSize: '11px',
+      border: '1px solid var(--line)',
+      borderRadius: '999px',
+      width: '15px',
+      height: '15px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, "i")), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, LWF_TABLE[stateName] ? (LWF_TABLE[stateName].frequency + " · state-wise statutory contribution") : "LWF Not Applicable in this State")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (lwfOn ? 'on' : ''),
+    onClick: () => setLwfOn(!lwfOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setLwfOn(!lwfOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": lwfOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), lwfOn && LWF_TABLE[stateName] && /*#__PURE__*/React.createElement("p", {
+    className: "txt-b mb-2 leading-relaxed"
+    ,
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, LWF_TABLE[stateName].type === 'percent' ? ("Employee 0.2% of wages (max ₹" + LWF_TABLE[stateName].employeeCap + "/mo) · Employer 2× employee (max ₹" + LWF_TABLE[stateName].employerCap + "/mo).") : ("Employee ₹" + LWF_TABLE[stateName].employee + " · Employer ₹" + LWF_TABLE[stateName].employer + " per " + LWF_TABLE[stateName].frequency.toLowerCase() + " cycle.")), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-5"
+  }), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between gap-3 mb-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0"
@@ -4090,6 +4409,8 @@ function App() {
     result: result,
     tab: tab,
     monthlyTDS: taxResult[taxResult.betterRegime].monthlyTDS
+  }), /*#__PURE__*/React.createElement(LWFCard, {
+    result: result
   }), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch"
   }, /*#__PURE__*/React.createElement(SalaryHealthScore, {
@@ -4222,10 +4543,15 @@ function App() {
     monthly: result.bonusMonthly,
     annual: result.bonusAnnual,
     tab: tab
+  }), result.lwfOn && result.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+    label: "Labour Welfare Fund (Employer) — " + result.lwfFrequency,
+    monthly: result.lwfEmployerMonthly,
+    annual: result.lwfEmployerAnnual,
+    tab: tab
   }), /*#__PURE__*/React.createElement(Row, {
     label: "Total Reconciled CTC",
-    monthly: result.gross + result.employerPF + result.employerESIC + result.gratuity + result.bonusMonthly,
-    annual: (result.gross + result.employerPF + result.employerESIC + result.gratuity + result.bonusMonthly) * 12,
+    monthly: result.gross + result.employerPF + result.employerESIC + result.gratuity + result.bonusMonthly + result.lwfEmployerMonthly,
+    annual: (result.gross + result.employerPF + result.employerESIC + result.gratuity + result.bonusMonthly + result.lwfEmployerMonthly) * 12,
     tab: tab,
     bold: true
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -4288,7 +4614,17 @@ function App() {
     monthly: result.ptMonthly,
     annual: result.ptAnnual,
     tab: tab
-  }), /*#__PURE__*/React.createElement(Row, {
+  }), result.lwfOn && result.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+    label: "Labour Welfare Fund (Employee) — " + result.lwfFrequency,
+    monthly: result.lwfEmployeeMonthly,
+    annual: result.lwfEmployeeAnnual,
+    tab: tab
+  }), result.lwfOn && !result.lwfApplicable && /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-1 mb-1",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "LWF Not Applicable in this State"), /*#__PURE__*/React.createElement(Row, {
     label: "Total Deductions",
     monthly: result.totalEmployeeDeductions,
     annual: result.totalEmployeeDeductions * 12,
