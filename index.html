@@ -723,6 +723,195 @@ function computeManual(inputs) {
   };
 }
 
+/* ============== NEW LABOUR CODE CALCULATION ENGINE ==============
+   Implements the Code on Wages, 2019 "wages" definition (Sec. 2(y)) using the
+   50% add-back mechanism. This does NOT force Basic Salary to be 50% of CTC.
+   Instead: if the specified excluded components (HRA, conveyance, special/other
+   allowances etc.) exceed 50% of total remuneration, the excess over that 50%
+   threshold is added back on top of Basic + DA + Retaining Allowance to arrive
+   at the "statutory wage" used for PF / ESIC calculations.
+
+   All statutory percentages/thresholds are centralised below so they can be
+   updated easily when the government notifies new rules — nothing else in this
+   engine hard-codes a rate. This mode is fully separate from computeStructure()
+   and computeManual() above; those two functions are untouched. ============== */
+const LABOUR_CODE_CONFIG = {
+  wageAllowanceThreshold: 0.50,
+  // Code on Wages 2019, Sec 2(y) proviso — excluded components are capped at
+  // this fraction of total remuneration before the excess is added back.
+  esicEmployeeRate: 0.0075,
+  esicEmployerRate: 0.0325,
+  esicWageCeiling: 21000,
+  // Monthly wage ceiling for ESI coverage (currently applicable ceiling).
+  employeePFRate: 0.12,
+  employerPFRateDefault: 12,
+  pfWageCeiling: 15000
+  // Statutory PF wage ceiling used when PF basis is set to "Capped".
+};
+
+// Step 1-7 of the required flow: identify Basic+DA+Retaining Allowance,
+// identify excluded components, apply the 50% threshold, calculate the excess,
+// and add the excess back to arrive at the Final Statutory Wage. Returns a
+// detailed object (not just a number) so the UI can show every intermediate step.
+function calculateLabourCodeWages(inputs) {
+  const {
+    totalRemuneration = 0,
+    basic = 0,
+    da = 0,
+    retainingAllowance = 0
+  } = inputs;
+  const basicDaRetaining = basic + da + retainingAllowance;
+  // Everything else paid to the employee (HRA, conveyance, special/other
+  // allowances, and any other similarly-excluded component) is treated as the
+  // "excluded" pool for the 50% test.
+  const excludedAllowances = Math.max(0, totalRemuneration - basicDaRetaining);
+  const fiftyPercentThreshold = totalRemuneration * LABOUR_CODE_CONFIG.wageAllowanceThreshold;
+  const excessAllowance = Math.max(0, excludedAllowances - fiftyPercentThreshold);
+  const statutoryWages = Math.min(totalRemuneration, basicDaRetaining + excessAllowance);
+  return {
+    totalRemuneration,
+    basic,
+    da,
+    retainingAllowance,
+    basicDaRetaining,
+    excludedAllowances,
+    fiftyPercentThreshold,
+    excessAllowance,
+    statutoryWages
+  };
+}
+
+// Full New Labour Code calculation mode: salary components -> total remuneration
+// -> Basic+DA+Retaining -> excluded components -> 50% threshold -> excess ->
+// add-back -> Final Statutory Wage -> PF/ESIC -> Gross/Deductions/In-Hand.
+// Reuses computeLWF() and PT_TABLE (same as the existing modes) so PT/LWF logic
+// is not duplicated or changed.
+function computeLabourCode(inputs) {
+  const {
+    ctcRaw,
+    mode,
+    basicPct,
+    daPct,
+    raPct,
+    hraPct,
+    conveyance,
+    stateName,
+    pfOn,
+    pfMode,
+    employerPFPct,
+    gratuityOn,
+    esicOn,
+    bonusOn,
+    bonusPct,
+    lwfOn
+  } = inputs;
+  const ctcMonthly = mode === 'annual' ? ctcRaw / 12 : ctcRaw;
+  const basic = ctcMonthly * (basicPct / 100);
+  const da = ctcMonthly * ((daPct || 0) / 100);
+  const retainingAllowance = ctcMonthly * ((raPct || 0) / 100);
+  const hra = basic * (hraPct / 100);
+  const bonusEligible = basic <= BONUS_ELIGIBILITY_CEILING;
+  const bonusWage = Math.min(basic, BONUS_WAGE_CEILING);
+  const clampedBonusPct = Math.min(20, Math.max(8.33, bonusPct));
+  const bonusAnnual = bonusOn && bonusEligible ? bonusWage * (clampedBonusPct / 100) * 12 : 0;
+  const bonusMonthly = bonusAnnual / 12;
+  const gratuity = gratuityOn ? basic * 0.0481 : 0;
+
+  // Total remuneration for the wage test = amount actually payable to the
+  // employee each month (CTC minus the employer's own contributions/bonus),
+  // computed iteratively since PF/ESIC themselves depend on the statutory wage.
+  let gross = ctcMonthly - gratuity - bonusMonthly;
+  let wageAnalysis = calculateLabourCodeWages({
+    totalRemuneration: gross,
+    basic,
+    da,
+    retainingAllowance
+  });
+  let employerPF = 0,
+    employeePF = 0,
+    employerESIC = 0,
+    employeeESIC = 0,
+    pfBasis = 0;
+  for (let i = 0; i < 8; i++) {
+    wageAnalysis = calculateLabourCodeWages({
+      totalRemuneration: gross,
+      basic,
+      da,
+      retainingAllowance
+    });
+    const statutoryWages = wageAnalysis.statutoryWages;
+    pfBasis = pfOn ? pfMode === 'capped' ? Math.min(statutoryWages, LABOUR_CODE_CONFIG.pfWageCeiling) : statutoryWages : 0;
+    employerPF = pfOn ? pfBasis * (employerPFPct / 100) : 0;
+    employeePF = pfOn ? pfBasis * LABOUR_CODE_CONFIG.employeePFRate : 0;
+    // ESIC Wage = Applicable Labour Code Wage (NOT simply Gross Salary).
+    if (esicOn && statutoryWages <= LABOUR_CODE_CONFIG.esicWageCeiling) {
+      employerESIC = statutoryWages * LABOUR_CODE_CONFIG.esicEmployerRate;
+      employeeESIC = statutoryWages * LABOUR_CODE_CONFIG.esicEmployeeRate;
+    } else {
+      employerESIC = 0;
+      employeeESIC = 0;
+    }
+    gross = ctcMonthly - employerPF - gratuity - employerESIC - bonusMonthly;
+  }
+  let conv = Math.min(conveyance, CONVEYANCE_CAP);
+  let special = gross - basic - da - retainingAllowance - hra - conv;
+  if (special < 0) {
+    conv = Math.max(0, conv + special);
+    special = gross - basic - da - retainingAllowance - hra - conv;
+    if (special < 0) special = 0;
+  }
+  const ptAnnual = PT_TABLE[stateName] || 0;
+  const ptMonthly = ptAnnual / 12;
+  const lwf = computeLWF(stateName, lwfOn, gross);
+  const totalEmployeeDeductions = employeePF + employeeESIC + ptMonthly + lwf.lwfEmployeeMonthly;
+  const netInHand = gross - totalEmployeeDeductions;
+  const employerAddOn = employerPF + employerESIC + gratuity + lwf.lwfEmployerMonthly;
+  const employerAddOnWithBonus = employerAddOn + bonusMonthly;
+  const inHandPct = ctcMonthly > 0 ? netInHand / ctcMonthly * 100 : 0;
+  const netInHandAnnual = netInHand * 12 + bonusAnnual - lwf.lwfEmployeeMonthly * 12 + lwf.lwfEmployeeAnnual;
+  // EPF/EPS/Admin split of the employer's PF contribution (on the Labour
+  // Code statutory-wage PF basis, not gross) — same breakdown logic as the
+  // existing modes, for the "PF & Compliance Notes" panel.
+  const epfSplitEPF = pfOn ? pfBasis * 0.0367 : 0;
+  const epfSplitEPS = pfOn ? pfBasis * 0.0833 : 0;
+  const epfAdmin = pfOn && employerPFPct > 12 ? pfBasis * ((employerPFPct - 12) / 100) : 0;
+  return {
+    ctcMonthly,
+    basic,
+    da,
+    retainingAllowance,
+    hra,
+    conveyance: conv,
+    special,
+    gross,
+    employerPF,
+    employeePF,
+    gratuity,
+    employerESIC,
+    employeeESIC,
+    ptMonthly,
+    ptAnnual,
+    netInHand,
+    netInHandAnnual,
+    employerAddOn: employerAddOnWithBonus,
+    inHandPct,
+    totalEmployeeDeductions,
+    pfBasis,
+    epfSplitEPF,
+    epfSplitEPS,
+    epfAdmin,
+    stateName,
+    bonusOn,
+    bonusEligible,
+    bonusWage,
+    bonusPct: clampedBonusPct,
+    bonusAnnual,
+    bonusMonthly,
+    labourCodeWages: wageAnalysis,
+    ...lwf
+  };
+}
+
 /* ============== INCOME TAX ENGINE (Old vs New Regime) ============== */
 const OLD_REGIME_SLABS = [[250000, 0], [500000, 0.05], [1000000, 0.20], [Infinity, 0.30]];
 const NEW_REGIME_SLABS = [[400000, 0], [800000, 0.05], [1200000, 0.10], [1600000, 0.15], [2000000, 0.20], [2400000, 0.25], [Infinity, 0.30]];
@@ -2552,7 +2741,32 @@ function App() {
   const [empName, setEmpName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [appShown, setAppShown] = useState(false);
-  const [view, setView] = useState('landing'); // 'landing' | 'ctc' | 'manual'
+  const [view, setView] = useState('landing'); // 'landing' | 'ctc' | 'manual' | 'labour'
+
+  // ===== New Labour Code mode state (reuses ctcRaw, mode, basicPct, hraPct,
+  // conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn,
+  // bonusOn, bonusPct, lwfOn from above — only DA% and Retaining Allowance%
+  // are new inputs specific to this mode) =====
+  const [daPct, setDaPct] = useState(0);
+  const [raPct, setRaPct] = useState(0);
+  const [lHasCalculated, setLHasCalculated] = useState(false);
+  const [lLoading, setLLoading] = useState(false);
+  const [showLabourWhy, setShowLabourWhy] = useState(false);
+  const [showLabourCompare, setShowLabourCompare] = useState(false);
+  const [labourInfoOpen, setLabourInfoOpen] = useState(false);
+  function handleCalculateLabour() {
+    setLLoading(true);
+    setTimeout(() => {
+      setLHasCalculated(true);
+      setLLoading(false);
+      setTimeout(() => {
+        document.getElementById('section-e-labour')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        });
+      }, 60);
+    }, 900);
+  }
 
   // ===== Toast notifications =====
   const [toasts, setToasts] = useState([]);
@@ -2617,6 +2831,7 @@ function App() {
     if (view === 'landing') {
       setHasCalculated(false);
       setMHasCalculated(false);
+      setLHasCalculated(false);
     }
   }, [view]);
 
@@ -2687,8 +2902,28 @@ function App() {
     bonusPct,
     lwfOn
   }), [ctcRaw, mode, basicPct, hraPct, conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn, bonusOn, bonusPct, lwfOn]);
+  const labourResult = useMemo(() => computeLabourCode({
+    ctcRaw,
+    mode,
+    basicPct,
+    daPct,
+    raPct,
+    hraPct,
+    conveyance,
+    stateName,
+    pfOn,
+    pfMode,
+    employerPFPct,
+    gratuityOn,
+    esicOn,
+    bonusOn,
+    bonusPct,
+    lwfOn
+  }), [ctcRaw, mode, basicPct, daPct, raPct, hraPct, conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn, bonusOn, bonusPct, lwfOn]);
   const netDisplay = result.netInHand;
   const animatedNet = useCountUp(netDisplay, 800);
+  const lNetDisplay = labourResult.netInHand;
+  const lAnimatedNet = useCountUp(lNetDisplay, 800);
   const taxResult = useMemo(() => computeIncomeTax({
     taxableSalaryAnnual: result.gross * 12 + result.bonusAnnual,
     basicAnnual: result.basic * 12,
@@ -2756,6 +2991,25 @@ function App() {
     pfLabel: mPfOn ? 'Employer PF Contribution' : 'Employer PF Contribution (N/A)',
     bonusLabel: mBonusOn ? 'Statutory Bonus' : 'Statutory Bonus (N/A)',
     employeePfLabel: mPfOn ? 'Employee PF Contribution' : 'Employee PF (Not Deducted)'
+  };
+  const lTaxResult = useMemo(() => computeIncomeTax({
+    taxableSalaryAnnual: labourResult.gross * 12 + labourResult.bonusAnnual,
+    basicAnnual: labourResult.basic * 12,
+    hraReceivedAnnual: labourResult.hra * 12,
+    cityType,
+    rentPaidAnnual: rentPaid,
+    inv80C,
+    inv80D,
+    inv80CCD1B
+  }), [labourResult, cityType, rentPaid, inv80C, inv80D, inv80CCD1B]);
+  const labourMeta = {
+    title: 'New Labour Code Salary Structure',
+    employeeName: empName,
+    companyName: companyName,
+    subtitle: `${companyName ? companyName + ' · ' : ''}State: ${stateName} · City: ${cityType === 'metro' ? 'Metro' : 'Non-Metro'} · PF: ${pfOn ? 'Applicable' : 'N/A'} · Statutory Wage: ₹${formatNumber(Math.round(labourResult.labourCodeWages.statutoryWages))}`,
+    pfLabel: pfOn ? `Employer PF Contribution (${employerPFPct}%)` : 'Employer PF Contribution (N/A)',
+    bonusLabel: bonusOn && labourResult.bonusEligible ? `Statutory Bonus (${labourResult.bonusPct.toFixed(2)}%)` : 'Statutory Bonus (N/A)',
+    employeePfLabel: pfOn ? 'Employee PF Contribution (12%)' : 'Employee PF (Not Deducted)'
   };
   function handleMCtcInput(e) {
     const raw = parseCurrency(e.target.value);
@@ -2872,7 +3126,7 @@ function App() {
         background: 'color-mix(in srgb, var(--gold) 14%, transparent)'
       }
     }), /*#__PURE__*/React.createElement("div", {
-      className: "max-w-3xl w-full text-center relative"
+      className: "max-w-5xl w-full text-center relative"
     }, /*#__PURE__*/React.createElement("img", {
       src: LOGO_WIDE,
       alt: "Salary Analyzer logo",
@@ -2897,7 +3151,7 @@ function App() {
         color: 'var(--gold-soft)'
       }
     }, "Salary Analyzer"), " · Designed & Developed by Harsh Agarwal"), /*#__PURE__*/React.createElement("div", {
-      className: "grid grid-cols-1 sm:grid-cols-2 gap-6"
+      className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => setView('ctc'),
       className: "glass card-hover rounded-2xl p-8 text-left group",
@@ -2984,7 +3238,1130 @@ function App() {
       style: {
         color: 'var(--gold-soft)'
       }
+    }, "Open Calculator →")), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setView('labour'),
+      className: "glass card-hover rounded-2xl p-8 text-left relative",
+      style: {
+        cursor: 'pointer'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "chip absolute top-5 right-5",
+      style: {
+        fontSize: '10.5px',
+        color: 'var(--emerald)',
+        borderColor: 'var(--emerald)'
+      }
+    }, "NEW • Labour Code"), /*#__PURE__*/React.createElement("div", {
+      className: "w-12 h-12 rounded-xl flex items-center justify-center mb-5 shadow-lg",
+      style: {
+        background: 'linear-gradient(135deg,var(--emerald),var(--indigo))'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-display italic txt-h font-semibold",
+      style: {
+        color: '#fff'
+      }
+    }, "§")), /*#__PURE__*/React.createElement("div", {
+      className: "font-display italic txt-h mb-2",
+      style: {
+        color: 'var(--ink)'
+      }
+    }, "⚖️ New Labour Code Calculation"), /*#__PURE__*/React.createElement("p", {
+      className: "txt-b leading-relaxed mb-4",
+      style: {
+        color: 'var(--ink-faint)'
+      }
+    }, "Calculates statutory wages using the Code on Wages 50% allowance add-back mechanism — not a forced 50% Basic."), /*#__PURE__*/React.createElement("div", {
+      className: "flex flex-wrap gap-2 mb-1"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "chip",
+      style: {
+        fontSize: '13px'
+      }
+    }, "50% Add-Back Rule"), /*#__PURE__*/React.createElement("span", {
+      className: "chip",
+      style: {
+        fontSize: '13px'
+      }
+    }, "Old vs New Compare")), /*#__PURE__*/React.createElement("div", {
+      className: "mt-5 txt-b font-semibold",
+      style: {
+        color: 'var(--gold-soft)'
+      }
     }, "Open Calculator →")))));
+  }
+  if (view === 'labour') {
+  const lCircumference = 527.8;
+  const lPct = Math.max(0, Math.min(100, labourResult.inHandPct));
+  const lOffset = lCircumference - lPct / 100 * lCircumference;
+  return /*#__PURE__*/React.createElement("div", {
+    id: "appRootLabour",
+    style: {
+      opacity: appShown ? 1 : 0,
+      transform: appShown ? 'translateY(0)' : 'translateY(8px)',
+      transition: 'opacity 900ms ease, transform 900ms ease'
+    }
+  }, /*#__PURE__*/React.createElement(AppHeader, {
+    title: "⚖️ New Labour Code Calculation",
+    subtitle: "Code on Wages · 50% Add-Back",
+    theme: theme,
+    setTheme: setTheme,
+    setView: setView
+  }), /*#__PURE__*/React.createElement("main", {
+    className: "max-w-[1400px] mx-auto px-6 lg:px-10 py-10 grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-7"
+  }, /*#__PURE__*/React.createElement("aside", {
+    className: "space-y-7 xl:sticky xl:top-24 h-fit"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-5"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "A · Employee & Company Info"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "Optional")), /*#__PURE__*/React.createElement("div", {
+    className: "mb-4"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "Employee Name"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: empName,
+    placeholder: "e.g. AbC",
+    onChange: e => setEmpName(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "Company Name"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: companyName,
+    placeholder: "e.g. AbC Company",
+    onChange: e => setCompanyName(e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-5"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "B · Salary Inputs"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, mode === 'annual' ? 'Annual' : 'Monthly', " CTC")), /*#__PURE__*/React.createElement("div", {
+    className: "mb-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "Cost to Company"), /*#__PURE__*/React.createElement("div", {
+    className: "seg",
+    style: {
+      width: '150px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: mode === 'monthly' ? 'active' : '',
+    onClick: () => switchMode('monthly')
+  }, "Monthly"), /*#__PURE__*/React.createElement("button", {
+    className: mode === 'annual' ? 'active' : '',
+    onClick: () => switchMode('annual')
+  }, "Annual"))), /*#__PURE__*/React.createElement(CurrencyInput, {
+    type: "text",
+    inputMode: "numeric",
+    value: ctcDisplay,
+    fontSize: "16px",
+    onChange: handleCtcInput,
+    onBlur: handleCtcBlur
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "City type (for HRA exemption) is set in the Income Tax Estimator below, alongside your other tax inputs.")), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-5"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "C · Salary Components"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "0–100%")), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-4 mb-5"
+  }, /*#__PURE__*/React.createElement(PercentInput, {
+    id: "basicPctInput",
+    label: "Basic % of CTC",
+    value: basicPct,
+    onChange: setBasicPct
+  }), /*#__PURE__*/React.createElement(PercentInput, {
+    id: "hraPctInput",
+    label: "HRA % of Basic",
+    value: hraPct,
+    onChange: setHraPct
+  }), /*#__PURE__*/React.createElement(PercentInput, {
+    id: "daPctInput",
+    label: "DA % of CTC",
+    value: daPct,
+    onChange: setDaPct
+  }), /*#__PURE__*/React.createElement(PercentInput, {
+    id: "raPctInput",
+    label: "Retaining Allow. % of CTC",
+    value: raPct,
+    onChange: setRaPct
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed mb-1",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Basic + DA + Retaining Allowance form the Labour Code wage base before the 50% add-back is applied — see \"Labour Code Wage Analysis\" below."), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "Conveyance Allowance (Monthly)"), /*#__PURE__*/React.createElement(CurrencyInput, {
+    value: conveyance,
+    min: "0",
+    max: "1600",
+    step: "100",
+    onChange: e => {
+      const v = parseFloat(e.target.value) || 0;
+      setConveyance(Math.min(1600, Math.max(0, v)));
+    }
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b mt-1.5 leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Capped at ₹1,600/month — the standard tax-exempt conveyance ceiling. It forms part of CTC, not an addition over it.")), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-5"
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Special Allowance is auto-computed as the balancing figure so that Gross + Employer PF + Employer ESIC + Gratuity + Bonus always reconciles exactly to CTC.")), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-5"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "D · Statutory Compliance"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "PF · ESIC · Gratuity · Bonus · PT")), /*#__PURE__*/React.createElement("div", {
+    className: "mb-5"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "State (Professional Tax)"), /*#__PURE__*/React.createElement("select", {
+    value: stateName,
+    onChange: e => setStateName(e.target.value)
+  }, Object.keys(PT_TABLE).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s)))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Deduct PF?"), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Turn off to exclude PF entirely (employer + employee)")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (pfOn ? 'on' : ''),
+    onClick: () => setPfOn(!pfOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setPfOn(!pfOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": pfOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "mb-5",
+    style: {
+      opacity: pfOn ? 1 : 0.4,
+      pointerEvents: pfOn ? 'auto' : 'none'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "PF Calculation Basis"), /*#__PURE__*/React.createElement("div", {
+    className: "seg"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: pfMode === 'full' ? 'active' : '',
+    disabled: !pfOn,
+    onClick: () => setPfMode('full')
+  }, "Full Basic"), /*#__PURE__*/React.createElement("button", {
+    className: pfMode === 'capped' ? 'active' : '',
+    disabled: !pfOn,
+    onClick: () => setPfMode('capped')
+  }, "Capped ₹15,000"))), /*#__PURE__*/React.createElement("div", {
+    className: "mb-5",
+    style: {
+      opacity: pfOn ? 1 : 0.4,
+      pointerEvents: pfOn ? 'auto' : 'none'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "Employer PF Share"), /*#__PURE__*/React.createElement("div", {
+    className: "seg"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: employerPFPct === 12 ? 'active' : '',
+    disabled: !pfOn,
+    onClick: () => setEmployerPFPct(12)
+  }, "12% Standard"), /*#__PURE__*/React.createElement("button", {
+    className: employerPFPct === 13 ? 'active' : '',
+    disabled: !pfOn,
+    onClick: () => setEmployerPFPct(13)
+  }, "13% + Admin/EDLI")), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b mt-1.5 leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "13% adds ~1% Admin & EDLI charges to employer's PF cost. Employee's own PF deduction stays fixed at 12%.")), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-5"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Include Gratuity"), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "4.81% of Basic Salary")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (gratuityOn ? 'on' : ''),
+    onClick: () => setGratuityOn(!gratuityOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setGratuityOn(!gratuityOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": gratuityOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Apply ESIC"), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Auto if Statutory Wage ≤ ₹21,000/mo")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (esicOn ? 'on' : ''),
+    onClick: () => setEsicOn(!esicOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setEsicOn(!esicOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": esicOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-5"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium flex items-center gap-1.5",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Labour Welfare Fund (LWF)", /*#__PURE__*/React.createElement("span", {
+    title: LWF_TOOLTIP_TEXT,
+    style: {
+      cursor: 'help',
+      color: 'var(--ink-faint)',
+      fontSize: '11px',
+      border: '1px solid var(--line)',
+      borderRadius: '999px',
+      width: '15px',
+      height: '15px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, "i")), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, LWF_TABLE[stateName] ? (LWF_TABLE[stateName].frequency + " · state-wise statutory contribution") : "LWF Not Applicable in this State")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (lwfOn ? 'on' : ''),
+    onClick: () => setLwfOn(!lwfOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setLwfOn(!lwfOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": lwfOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), lwfOn && LWF_TABLE[stateName] && /*#__PURE__*/React.createElement("p", {
+    className: "txt-b mb-2 leading-relaxed"
+    ,
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, LWF_TABLE[stateName].type === 'percent' ? ("Employee 0.2% of wages (max ₹" + LWF_TABLE[stateName].employeeCap + "/mo) · Employer 2× employee (max ₹" + LWF_TABLE[stateName].employerCap + "/mo).") : ("Employee ₹" + LWF_TABLE[stateName].employee + " · Employer ₹" + LWF_TABLE[stateName].employer + " per " + LWF_TABLE[stateName].frequency.toLowerCase() + " cycle.")), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-5"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-sh font-medium",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Statutory Bonus"), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-0.5",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Payment of Bonus Act, 1965")), /*#__PURE__*/React.createElement("div", {
+    className: "toggle " + (bonusOn ? 'on' : ''),
+    onClick: () => setBonusOn(!bonusOn),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setBonusOn(!bonusOn);
+      }
+    },
+    role: "switch",
+    "aria-checked": bonusOn,
+    tabIndex: 0
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "knob"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      opacity: bonusOn ? 1 : 0.4,
+      pointerEvents: bonusOn ? 'auto' : 'none'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label block mb-2"
+  }, "Bonus Rate (Statutory)"), /*#__PURE__*/React.createElement("div", {
+    className: "seg"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: bonusPct === 8.33 ? 'active' : '',
+    disabled: !bonusOn,
+    onClick: () => setBonusPct(8.33)
+  }, "Minimum · 8.33%"), /*#__PURE__*/React.createElement("button", {
+    className: bonusPct === 20 ? 'active' : '',
+    disabled: !bonusOn,
+    onClick: () => setBonusPct(20)
+  }, "Maximum · 20%")), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b mt-1.5 leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, labourResult.bonusEligible ? `Eligible — computed on wage ceiling of ₹${formatNumber(7000)}/month, paid annually.` : `Basic exceeds ₹21,000/month — not statutorily eligible for bonus.`))), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "⚖️ Labour Code Wage Analysis"), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      color: 'var(--emerald)',
+      borderColor: 'var(--emerald)'
+    }
+  }, "50% Rule")), /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed mb-3",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Calculates statutory wages using the applicable Labour Code wage-definition and 50% allowance add-back mechanism."), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4 space-y-1.5",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, [["Basic + DA + Retaining Allow.", labourResult.labourCodeWages.basicDaRetaining], ["Excluded Allowances", labourResult.labourCodeWages.excludedAllowances], ["50% Threshold", labourResult.labourCodeWages.fiftyPercentThreshold], ["Excess / Add-Back", labourResult.labourCodeWages.excessAllowance]].map((row, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-center justify-between txt-b"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--ink-dim)'
+    }
+  }, row[0]), /*#__PURE__*/React.createElement("span", {
+    className: "num",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(row[1])))), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-1.5"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "txt-sh font-semibold",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Final Statutory Wage"), /*#__PURE__*/React.createElement("span", {
+    className: "num txt-sh font-semibold",
+    style: {
+      color: 'var(--gold-soft)'
+    }
+  }, formatCurrency(labourResult.labourCodeWages.statutoryWages)))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowLabourWhy(!showLabourWhy),
+    className: "txt-b mt-3 font-semibold",
+    style: {
+      color: 'var(--indigo-soft)'
+    }
+  }, showLabourWhy ? '▾ ' : '▸ ', "Why is my Labour Code Wage different?"), showLabourWhy && /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed mt-2",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "This does not mean Basic Salary must automatically be 50% of CTC. Where excluded components (HRA, conveyance, special allowance etc.) exceed the permitted 50% portion of remuneration, the excess is added back to wages for statutory PF/ESIC calculations only — Basic itself is unchanged."))), /*#__PURE__*/React.createElement("section", {
+    className: "space-y-7"
+  }, !lHasCalculated ? /*#__PURE__*/React.createElement(HeroCTA, {
+    onCalculate: handleCalculateLabour,
+    loading: lLoading
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    id: "section-e-labour"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "E · Salary Summary"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "Live")), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6 lg:p-9 relative overflow-hidden anim-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "absolute -top-24 -right-24 w-72 h-72 rounded-full blur-3xl",
+    style: {
+      background: 'color-mix(in srgb, var(--indigo) 15%, transparent)'
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "absolute -bottom-24 -left-16 w-64 h-64 rounded-full blur-3xl",
+    style: {
+      background: 'color-mix(in srgb, var(--gold) 15%, transparent)'
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "relative grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-8 items-center"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "chip mb-4 inline-block"
+  }, "Net Take-Home"), /*#__PURE__*/React.createElement("div", {
+    className: "font-display italic txt-sh mb-2",
+    style: {
+      color: 'var(--ink-dim)'
+    }
+  }, "Net In-Hand Salary (per month)"), /*#__PURE__*/React.createElement("div", {
+    className: "hero-amount text-[3.4rem] lg:text-[5.2rem]"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "symbol grad-text"
+  }, "₹"), /*#__PURE__*/React.createElement("span", {
+    className: "grad-text"
+  }, formatNumber(lAnimatedNet))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 txt-sh",
+    style: {
+      color: 'var(--ink-dim)'
+    }
+  }, "Annual (incl. bonus): ", /*#__PURE__*/React.createElement("span", {
+    className: "num",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(labourResult.netInHandAnnual)), !pfOn && /*#__PURE__*/React.createElement("span", {
+    className: "ml-3 chip"
+  }, "PF Excluded")), /*#__PURE__*/React.createElement("div", {
+    className: "mt-5 grid grid-cols-3 gap-3 max-w-md"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl px-3 py-2.5",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-b tracking-wide uppercase truncate block",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Gross"), /*#__PURE__*/React.createElement("div", {
+    className: "num txt-sh mt-1",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(labourResult.gross))), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl px-3 py-2.5",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-b tracking-wide uppercase truncate block",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Deductions"), /*#__PURE__*/React.createElement("div", {
+    className: "num txt-sh mt-1",
+    style: {
+      color: 'var(--rose)'
+    }
+  }, "−", formatCurrency(labourResult.totalEmployeeDeductions))), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl px-3 py-2.5",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "txt-b tracking-wide uppercase truncate block",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Employer Add-on"), /*#__PURE__*/React.createElement("div", {
+    className: "num txt-sh mt-1",
+    style: {
+      color: 'var(--indigo-soft)'
+    }
+  }, "+", formatCurrency(labourResult.employerAddOn))))), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col items-center justify-self-center"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "196",
+    height: "196",
+    viewBox: "0 0 196 196"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "98",
+    cy: "98",
+    r: "84",
+    fill: "none",
+    stroke: "var(--line)",
+    strokeWidth: "14"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "98",
+    cy: "98",
+    r: "84",
+    fill: "none",
+    stroke: "url(#gaugeGrad)",
+    strokeWidth: "14",
+    strokeLinecap: "round",
+    strokeDasharray: lCircumference,
+    strokeDashoffset: lOffset,
+    transform: "rotate(-90 98 98)",
+    style: {
+      transition: 'stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)'
+    }
+  }), /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+    id: "gaugeGrad",
+    x1: "0%",
+    y1: "0%",
+    x2: "100%",
+    y2: "100%"
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "0%",
+    stopColor: "var(--gold)"
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "100%",
+    stopColor: "var(--indigo)"
+  }))), /*#__PURE__*/React.createElement("text", {
+    x: "98",
+    y: "92",
+    textAnchor: "middle",
+    fill: "var(--ink)",
+    fontSize: "34",
+    fontFamily: "Fraunces, serif",
+    fontStyle: "italic"
+  }, lPct.toFixed(1), "%"), /*#__PURE__*/React.createElement("text", {
+    x: "98",
+    y: "116",
+    textAnchor: "middle",
+    fill: "var(--ink-faint)",
+    fontSize: "10.5",
+    letterSpacing: "1.5",
+    fontFamily: "IBM Plex Mono, monospace"
+  }, "IN-HAND OF CTC"))))), /*#__PURE__*/React.createElement(DashboardCards, {
+    result: labourResult,
+    tab: tab,
+    monthlyTDS: lTaxResult[lTaxResult.betterRegime].monthlyTDS
+  }), /*#__PURE__*/React.createElement(LWFCard, {
+    result: labourResult
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch"
+  }, /*#__PURE__*/React.createElement(SalaryHealthScore, {
+    result: labourResult
+  }), /*#__PURE__*/React.createElement(AIInsights, {
+    result: labourResult,
+    taxResult: lTaxResult
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch"
+  }, /*#__PURE__*/React.createElement(AllocationBar, {
+    result: labourResult
+  }), /*#__PURE__*/React.createElement(EmployerVsInHand, {
+    result: labourResult
+  })), /*#__PURE__*/React.createElement(PercentageAnalysis, {
+    result: labourResult
+  }), /*#__PURE__*/React.createElement(ChartsCard, {
+    salaryData: [{
+      label: 'Basic',
+      value: labourResult.basic,
+      color: 'var(--gold)'
+    }, {
+      label: 'HRA',
+      value: labourResult.hra,
+      color: 'var(--indigo)'
+    }, {
+      label: 'Conveyance',
+      value: labourResult.conveyance,
+      color: 'var(--emerald)'
+    }, {
+      label: 'Special Allowance',
+      value: labourResult.special,
+      color: 'var(--rose)'
+    }],
+    deductionData: [{
+      label: 'Employee PF',
+      value: labourResult.employeePF,
+      color: 'var(--gold)'
+    }, {
+      label: 'Employee ESIC',
+      value: labourResult.employeeESIC,
+      color: 'var(--indigo)'
+    }, {
+      label: 'Professional Tax',
+      value: labourResult.ptMonthly,
+      color: 'var(--emerald)'
+    }, {
+      label: 'Income Tax (TDS)',
+      value: lTaxResult[lTaxResult.betterRegime].monthlyTDS,
+      color: 'var(--rose)'
+    }]
+  }), /*#__PURE__*/React.createElement(IncomeTaxCard, {
+    taxResult: lTaxResult,
+    rentPaid: rentPaid,
+    setRentPaid: setRentPaid,
+    inv80C: inv80C,
+    setInv80C: setInv80C,
+    inv80D: inv80D,
+    setInv80D: setInv80D,
+    inv80CCD1B: inv80CCD1B,
+    setInv80CCD1B: setInv80CCD1B,
+    cityType: cityType,
+    setCityType: setCityType
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between px-6 lg:px-8 pt-6 pb-5"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Full Breakdown"), /*#__PURE__*/React.createElement("div", {
+    className: "chip hidden sm:block"
+  }, "All values in ₹ / month")), /*#__PURE__*/React.createElement("div", {
+    className: "divider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "A · Employer Cost Breakdown"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "CTC")), /*#__PURE__*/React.createElement(Row, {
+    label: "Cost to Company (CTC)",
+    monthly: labourResult.ctcMonthly,
+    annual: labourResult.ctcMonthly * 12,
+    tab: tab,
+    bold: true
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Basic Salary",
+    monthly: labourResult.basic,
+    annual: labourResult.basic * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "HRA",
+    monthly: labourResult.hra,
+    annual: labourResult.hra * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Conveyance Allowance",
+    monthly: labourResult.conveyance,
+    annual: labourResult.conveyance * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Special Allowance",
+    monthly: labourResult.special,
+    annual: labourResult.special * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: pfOn ? `Employer PF Contribution (${employerPFPct}%)` : "Employer PF Contribution (N/A)",
+    monthly: labourResult.employerPF,
+    annual: labourResult.employerPF * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Employer ESIC Contribution",
+    monthly: labourResult.employerESIC,
+    annual: labourResult.employerESIC * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Gratuity",
+    monthly: labourResult.gratuity,
+    annual: labourResult.gratuity * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: labourResult.bonusOn && labourResult.bonusEligible ? `Statutory Bonus (${labourResult.bonusPct.toFixed(2)}%)` : "Statutory Bonus (N/A)",
+    monthly: labourResult.bonusMonthly,
+    annual: labourResult.bonusAnnual,
+    tab: tab
+  }), labourResult.lwfOn && labourResult.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+    label: "Labour Welfare Fund (Employer) — " + labourResult.lwfFrequency,
+    monthly: labourResult.lwfEmployerMonthly,
+    annual: labourResult.lwfEmployerAnnual,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Total Reconciled CTC",
+    monthly: labourResult.gross + labourResult.employerPF + labourResult.employerESIC + labourResult.gratuity + labourResult.bonusMonthly + labourResult.lwfEmployerMonthly,
+    annual: (labourResult.gross + labourResult.employerPF + labourResult.employerESIC + labourResult.gratuity + labourResult.bonusMonthly + labourResult.lwfEmployerMonthly) * 12,
+    tab: tab,
+    bold: true
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "B · Gross Salary Components"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "Gross")), /*#__PURE__*/React.createElement(Row, {
+    label: "Basic Salary",
+    monthly: labourResult.basic,
+    annual: labourResult.basic * 12,
+    tab: tab,
+    bold: true
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "House Rent Allowance (HRA)",
+    monthly: labourResult.hra,
+    annual: labourResult.hra * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Conveyance Allowance",
+    monthly: labourResult.conveyance,
+    annual: labourResult.conveyance * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Special / Other Allowance",
+    monthly: labourResult.special,
+    annual: labourResult.special * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Gross Salary",
+    monthly: labourResult.gross,
+    annual: labourResult.gross * 12,
+    tab: tab,
+    bold: true
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "C · Employee Deductions"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "− Deductions")), /*#__PURE__*/React.createElement(Row, {
+    label: pfOn ? "Employee PF Contribution (12%)" : "Employee PF (Not Deducted)",
+    monthly: labourResult.employeePF,
+    annual: labourResult.employeePF * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Employee ESIC Contribution",
+    monthly: labourResult.employeeESIC,
+    annual: labourResult.employeeESIC * 12,
+    tab: tab
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Professional Tax",
+    monthly: labourResult.ptMonthly,
+    annual: labourResult.ptAnnual,
+    tab: tab
+  }), labourResult.lwfOn && labourResult.lwfApplicable && /*#__PURE__*/React.createElement(Row, {
+    label: "Labour Welfare Fund (Employee) — " + labourResult.lwfFrequency,
+    monthly: labourResult.lwfEmployeeMonthly,
+    annual: labourResult.lwfEmployeeAnnual,
+    tab: tab
+  }), labourResult.lwfOn && !labourResult.lwfApplicable && /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-1 mb-1",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "LWF Not Applicable in this State"), /*#__PURE__*/React.createElement(Row, {
+    label: "Total Deductions",
+    monthly: labourResult.totalEmployeeDeductions,
+    annual: labourResult.totalEmployeeDeductions * 12,
+    tab: tab,
+    bold: true
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "PF & Compliance Notes"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "Info")), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3 txt-b leading-relaxed",
+    style: {
+      color: 'var(--ink-dim)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium mb-1.5 txt-b",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "EPF Employer Split ", pfOn ? `(${employerPFPct}%)` : "(Not Applicable)"), pfOn ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between"
+  }, /*#__PURE__*/React.createElement("span", null, "EPF (3.67%)"), /*#__PURE__*/React.createElement("span", {
+    className: "num",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(labourResult.epfSplitEPF))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between mt-1"
+  }, /*#__PURE__*/React.createElement("span", null, "EPS (8.33%, capped ₹15,000 basis)"), /*#__PURE__*/React.createElement("span", {
+    className: "num",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(labourResult.epfSplitEPS))), employerPFPct > 12 && /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between mt-1"
+  }, /*#__PURE__*/React.createElement("span", null, "Admin & EDLI Charges (~1%)"), /*#__PURE__*/React.createElement("span", {
+    className: "num",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, formatCurrency(labourResult.epfAdmin)))) : /*#__PURE__*/React.createElement("div", null, "PF has been switched off for this structure — no employer or employee PF contribution is calculated.")), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium mb-1.5 txt-b",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "ESIC Ceiling"), /*#__PURE__*/React.createElement("div", null, labourResult.employerESIC > 0 ? `Statutory Wage (₹${formatNumber(Math.round(labourResult.labourCodeWages.statutoryWages))}) is at or below the ₹21,000 ceiling. ESIC applies: Employer 3.25%, Employee 0.75%.` : `Statutory Wage (₹${formatNumber(Math.round(labourResult.labourCodeWages.statutoryWages))}) exceeds the ₹21,000 ceiling — ESIC is not applicable.`)), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium mb-1.5 txt-b",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Professional Tax"), /*#__PURE__*/React.createElement("div", null, stateName, ": ₹", formatNumber(labourResult.ptAnnual), "/year.", PT_MONTHLY_NOTE[stateName] && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, PT_MONTHLY_NOTE[stateName])), labourResult.ptAnnual === 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "No Professional Tax levied in this state.")))), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-xl p-4",
+    style: {
+      background: 'var(--input-bg)',
+      border: '1px solid var(--line)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium mb-1.5 txt-b",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Statutory Bonus — Payment of Bonus Act, 1965"), /*#__PURE__*/React.createElement("div", null, labourResult.bonusOn && labourResult.bonusEligible ? `Eligible: bonus computed on wage ceiling of ₹${formatNumber(7000)}/month at ${labourResult.bonusPct.toFixed(2)}%, paid annually as ${formatCurrency(labourResult.bonusAnnual)}.` : !labourResult.bonusEligible ? `Not eligible — Basic (₹${formatNumber(labourResult.basic)}) exceeds the ₹21,000/month eligibility ceiling.` : `Statutory Bonus is switched off for this structure.`, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "Law mandates a minimum of 8.33% and a maximum of 20% of eligible wages."))))))), /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-6 anim-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Compare: Existing Method vs New Labour Code"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowLabourCompare(!showLabourCompare),
+    className: "chip",
+    style: {
+      cursor: 'pointer'
+    }
+  }, showLabourCompare ? 'Hide' : 'Show')), showLabourCompare && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full",
+    style: {
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, ["Component", "Existing Method", "New Labour Code"].map((t, i) => /*#__PURE__*/React.createElement("th", {
+    key: i,
+    className: "txt-b uppercase tracking-wider text-left py-2 px-2",
+    style: {
+      color: 'var(--ink-faint)',
+      borderBottom: '1px solid var(--line)'
+    }
+  }, t)))), /*#__PURE__*/React.createElement("tbody", null, [["Basic", result.basic, labourResult.basic], ["Gross", result.gross, labourResult.gross], ["Statutory Wage (PF Basis)", result.pfBasis, labourResult.labourCodeWages.statutoryWages], ["Employee PF", result.employeePF, labourResult.employeePF], ["Employee ESIC", result.employeeESIC, labourResult.employeeESIC], ["Professional Tax", result.ptMonthly, labourResult.ptMonthly], ["Labour Welfare Fund", result.lwfEmployeeMonthly || 0, labourResult.lwfEmployeeMonthly || 0], ["Total Deductions", result.totalEmployeeDeductions, labourResult.totalEmployeeDeductions], ["In-Hand Salary", result.netInHand, labourResult.netInHand]].map((row, i) => {
+    const diff = Math.round(row[2] - row[1]);
+    return /*#__PURE__*/React.createElement("tr", {
+      key: i
+    }, /*#__PURE__*/React.createElement("td", {
+      className: "txt-sh py-2 px-2",
+      style: {
+        color: 'var(--ink-dim)',
+        borderBottom: '1px solid var(--line)'
+      }
+    }, row[0]), /*#__PURE__*/React.createElement("td", {
+      className: "num txt-sh py-2 px-2",
+      style: {
+        color: 'var(--ink)',
+        borderBottom: '1px solid var(--line)'
+      }
+    }, formatCurrency(row[1])), /*#__PURE__*/React.createElement("td", {
+      className: "num txt-sh py-2 px-2",
+      style: {
+        color: diff === 0 ? 'var(--ink)' : diff > 0 ? 'var(--emerald)' : 'var(--rose)',
+        borderBottom: '1px solid var(--line)',
+        fontWeight: diff !== 0 ? 700 : 400
+      }
+    }, formatCurrency(row[2]), diff !== 0 && /*#__PURE__*/React.createElement("span", {
+      className: "txt-b ml-1"
+    }, "(", diff > 0 ? '+' : '', formatCurrency(diff), ")")));
+  }))))), /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl p-5",
+    style: {
+      border: '1px solid var(--line)',
+      background: 'var(--input-bg)'
+    }
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "txt-b leading-relaxed",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "⚠ Salary calculations are estimates based on the applicable statutory rules and the information provided by you. Actual payroll treatment may vary depending on applicable notifications, employment structure, state-specific rules and employer policy. This is not legal advice.")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-h",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "D · Reports & Export"), /*#__PURE__*/React.createElement("span", {
+    className: "chip"
+  }, "Share / Download")), /*#__PURE__*/React.createElement(SalarySlipPreview, {
+    result: labourResult,
+    meta: labourMeta,
+    onPDF: () => {
+      downloadPDFReport(labourResult, labourMeta);
+      pushToast('PDF ready — choose "Save as PDF" in the print dialog.');
+    },
+    onEmail: () => {
+      emailSalarySlip(labourResult, labourMeta);
+      pushToast('Email client opened with your salary slip.');
+    }
+  })), /*#__PURE__*/React.createElement("footer", {
+    className: "text-center txt-b py-8 tracking-wide",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mb-1"
+  }, "Figures are indicative estimates based on standard Indian payroll structuring norms."), /*#__PURE__*/React.createElement("div", {
+    className: "divider my-4 max-w-xs mx-auto"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "font-display italic",
+    style: {
+      color: 'var(--ink-dim)'
+    }
+  }, "Powered by ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--gold-soft)'
+    }
+  }, "Salary Analyzer")), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1"
+  }, "Designed & Developed by Harsh Agarwal")))), /*#__PURE__*/React.createElement(Fab, {
+    onExcel: () => {
+      downloadExcelReport(labourResult, labourMeta, 'Labour_Code_Salary_Structure.xlsx');
+      pushToast('Excel file exported successfully!');
+    },
+    onPDF: () => {
+      downloadPDFReport(labourResult, labourMeta);
+      pushToast('PDF ready — choose "Save as PDF" in the print dialog.');
+    },
+    onEmail: () => {
+      emailSalarySlip(labourResult, labourMeta);
+      pushToast('Email client opened with your salary slip.');
+    },
+    onCopy: () => {
+      const text = buildSalarySummaryText(labourResult, labourMeta);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => pushToast('Summary copied to clipboard!')).catch(() => pushToast('Could not copy — please try again.'));
+      } else {
+        pushToast('Clipboard not available on this browser.');
+      }
+    },
+    theme: theme,
+    setTheme: setTheme
+  }), /*#__PURE__*/React.createElement(ToastStack, {
+    toasts: toasts,
+    dismissToast: dismissToast
+  }));
   }
   if (view === 'manual') {
     const mCircumference = 439.6; // 2*pi*70
