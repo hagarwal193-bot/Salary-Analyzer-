@@ -3,6 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script>
+  /* Apply the correct theme (saved preference, else OS/browser preference)
+     before first paint so there is no flash of the wrong theme. */
+  (function () {
+    try {
+      var saved = localStorage.getItem('sa-theme');
+      var theme = (saved === 'dark' || saved === 'light')
+        ? saved
+        : ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6141354548831342"
      crossorigin="anonymous"></script>
 <title>Salary Analyzer | Salary Calculator</title>
@@ -149,6 +164,40 @@
   @media (max-width:480px){ .brand-title{ font-size:16px !important; } .back-btn{ padding:10px 12px !important; } }
   @media (max-width:400px){ .brand-title{ font-size:14px !important; } .back-btn-label{ display:none; } .back-btn{ padding:10px !important; } }
   @media (max-width:340px){ .brand-title{ font-size:12.5px !important; } }
+  .brand-home-link{ border-radius:10px; transition: opacity .2s ease; }
+  .brand-home-link:hover{ opacity:0.85; }
+  .brand-home-link:focus-visible{ outline:2px solid var(--indigo-soft); outline-offset:3px; }
+
+  /* ===== Know-Your-In-Hand-Salary: calculation overlay ===== */
+  @keyframes calcOverlayPop{ from{ opacity:0; transform:scale(0.92); } to{ opacity:1; transform:scale(1); } }
+  .calc-overlay-pop{ animation: calcOverlayPop 260ms cubic-bezier(.2,.8,.2,1) both; }
+  .calc-overlay-coin{
+    width:56px; height:56px; margin:0 auto; border-radius:999px; display:flex; align-items:center; justify-content:center;
+    font-family:'Poppins',sans-serif; font-weight:800; font-size:24px; color:var(--bg-void);
+    background:linear-gradient(135deg,var(--gold),var(--indigo));
+    animation: calcCoinSpin 1100ms cubic-bezier(.45,0,.15,1) infinite;
+  }
+  @keyframes calcCoinSpin{
+    0%{ transform:rotateY(0deg) scale(1); }
+    45%{ transform:rotateY(180deg) scale(1.08); }
+    55%{ transform:rotateY(180deg) scale(1.08); }
+    100%{ transform:rotateY(360deg) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .calc-overlay-coin{ animation:none; }
+    .calc-overlay-pop{ animation:none; }
+  }
+
+  /* ===== Know-Your-In-Hand-Salary: collapsible basic-details panel =====
+     Used on all three calculators to hide the A–D input cards once the user
+     has calculated their in-hand salary, replacing them with a compact
+     summary. Selections are kept in React state (not reset) — only the
+     visibility changes. */
+  .kyihs-collapsible{ transition: grid-template-rows 520ms cubic-bezier(.4,0,.2,1), opacity 420ms ease; display:grid; }
+  .kyihs-collapsible > div{ overflow:hidden; min-height:0; }
+  .kyihs-collapsible.is-open{ grid-template-rows: 1fr; opacity:1; }
+  .kyihs-collapsible.is-collapsed{ grid-template-rows: 0fr; opacity:0; pointer-events:none; }
+  .kyihs-summary-bar{ animation: fadeUp 420ms ease both; }
 
   /* ===== QA fix: hero amount (white-space:nowrap) must not force horizontal
      scroll on narrow phones — scale it down instead of letting it overflow. ===== */
@@ -310,6 +359,30 @@
     #printSlip td, #printSlip th{ border:1px solid #ccc; padding:6px 10px; font-size:12px; }
     #printSlip .report-header, #printSlip .report-footer{ page-break-inside:avoid; }
   }
+/* ---------- Site-content animations (article/FAQ/about/etc.) ---------- */
+@keyframes scFadeUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
+@keyframes scFadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes scPulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.06); } }
+@keyframes scFloat { 0%,100% { transform:translateY(0px); } 50% { transform:translateY(-8px); } }
+@keyframes scDrawLine { from { stroke-dashoffset:220; } to { stroke-dashoffset:0; } }
+
+.sc-reveal { opacity:0; transform:translateY(24px); transition:opacity .7s ease, transform .7s cubic-bezier(.16,1,.3,1); }
+.sc-reveal.sc-visible { opacity:1; transform:translateY(0); }
+
+.sc-icon { animation: scFloat 4s ease-in-out infinite; }
+.sc-icon-pulse { animation: scPulse 2.6s ease-in-out infinite; }
+
+.sc-video-wrap { position:relative; border-radius:18px; overflow:hidden; border:1px solid var(--line); box-shadow: var(--card-shadow); }
+.sc-video-wrap video { display:block; width:100%; height:auto; background:#000; }
+
+.sc-faq-item { cursor:pointer; }
+.sc-faq-item .sc-faq-a { max-height:0; overflow:hidden; transition:max-height .4s ease, opacity .3s ease; opacity:0; }
+.sc-faq-item.sc-open .sc-faq-a { max-height:220px; opacity:1; }
+.sc-faq-item .sc-faq-q::before { content:'+'; display:inline-block; width:18px; color:var(--gold-soft); font-weight:700; transition:transform .3s ease; }
+.sc-faq-item.sc-open .sc-faq-q::before { transform:rotate(45deg); }
+
+.sc-stat-card { transition:transform .3s ease, box-shadow .3s ease; }
+.sc-stat-card:hover { transform:translateY(-4px); box-shadow:0 16px 30px -14px rgba(0,0,0,0.35); }
 </style>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-VYKCWM43RH"></script>
@@ -337,6 +410,181 @@
 <div id="root"></div>
 <div id="printSlip"></div>
 
+<!-- ============================================================
+     STATIC SITE CONTENT (article, FAQ, About, Privacy, Terms, Contact)
+     Added for AdSense policy compliance: real, original publisher
+     content alongside the calculator tool.
+     ============================================================ -->
+<div id="site-content" style="max-width:880px;margin:0 auto;padding:56px 20px 80px 20px;color:var(--ink-dim);font-family:'Inter',sans-serif;line-height:1.75;font-size:15px;">
+
+  <nav style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center;margin-bottom:40px;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;">
+    <a href="#guide" style="color:var(--ink-faint);text-decoration:none;">Salary Guide</a>
+    <a href="#faq" style="color:var(--ink-faint);text-decoration:none;">FAQ</a>
+    <a href="#about" style="color:var(--ink-faint);text-decoration:none;">About Us</a>
+    <a href="#privacy" style="color:var(--ink-faint);text-decoration:none;">Privacy Policy</a>
+    <a href="#terms" style="color:var(--ink-faint);text-decoration:none;">Terms</a>
+  </nav>
+
+  <!-- QUICK STAT CARDS -->
+  <section class="sc-reveal" style="margin-bottom:56px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
+    <div class="glass sc-stat-card" style="border-radius:14px;padding:18px 14px;text-align:center;">
+      <svg class="sc-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" style="margin:0 auto 8px auto;">
+        <circle cx="12" cy="12" r="10" stroke="var(--gold-soft)" stroke-width="1.6"/>
+        <path d="M9 12h6M12 9v6" stroke="var(--gold-soft)" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <div class="font-mono" style="color:var(--ink);font-weight:700;font-size:15px;">12% EPF</div>
+      <div style="font-size:11.5px;color:var(--ink-faint);">Standard employee PF rate</div>
+    </div>
+    <div class="glass sc-stat-card" style="border-radius:14px;padding:18px 14px;text-align:center;">
+      <svg class="sc-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" style="margin:0 auto 8px auto;animation-delay:.4s;">
+        <rect x="4" y="4" width="16" height="16" rx="3" stroke="var(--indigo-soft)" stroke-width="1.6"/>
+        <path d="M8 10h8M8 14h5" stroke="var(--indigo-soft)" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <div class="font-mono" style="color:var(--ink);font-weight:700;font-size:15px;">State-wise LWF</div>
+      <div style="font-size:11.5px;color:var(--ink-faint);">Auto-applied per state rules</div>
+    </div>
+    <div class="glass sc-stat-card" style="border-radius:14px;padding:18px 14px;text-align:center;">
+      <svg class="sc-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" style="margin:0 auto 8px auto;animation-delay:.8s;">
+        <path d="M4 19h16M6 19V9l5-4 5 4v10" stroke="var(--emerald)" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+      <div class="font-mono" style="color:var(--ink);font-weight:700;font-size:15px;">Excel &amp; PDF</div>
+      <div style="font-size:11.5px;color:var(--ink-faint);">One-click salary slip export</div>
+    </div>
+    <div class="glass sc-stat-card" style="border-radius:14px;padding:18px 14px;text-align:center;">
+      <svg class="sc-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" style="margin:0 auto 8px auto;animation-delay:1.2s;">
+        <path d="M12 2l2.4 6.6L21 10l-5 4.4L17.4 21 12 17.3 6.6 21 8 14.4 3 10l6.6-1.4L12 2z" stroke="var(--rose)" stroke-width="1.4" stroke-linejoin="round"/>
+      </svg>
+      <div class="font-mono" style="color:var(--ink);font-weight:700;font-size:15px;">100% Local</div>
+      <div style="font-size:11.5px;color:var(--ink-faint);">No data leaves your browser</div>
+    </div>
+  </section>
+
+  <section id="guide" class="sc-reveal" style="margin-bottom:56px;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+      <svg class="sc-icon-pulse" width="46" height="46" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;">
+        <circle cx="12" cy="12" r="9" stroke="var(--gold-soft)" stroke-width="1.5"/>
+        <path d="M12 3v9l6 3" stroke="var(--indigo-soft)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <h2 class="font-display" style="color:var(--ink);font-size:26px;margin:0;">Understanding CTC and In-Hand Salary: A Complete Guide</h2>
+    </div>
+
+    <p style="margin-bottom:16px;">When an Indian employer offers a job, the number quoted in the offer letter is almost always the <strong>Cost to Company (CTC)</strong>, not the amount that actually lands in the employee's bank account every month. This gap between CTC and take-home pay confuses most first-time job seekers, and even experienced professionals often struggle to work out exactly where their money goes. This calculator, and the guide below, exist to make that breakdown transparent.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">What exactly is CTC?</h3>
+    <p style="margin-bottom:16px;">CTC is the total yearly expense an employer incurs to keep an employee on its payroll. It is an umbrella figure that includes the fixed monthly pay, statutory contributions the company makes on the employee's behalf, and various benefits — some of which the employee never sees as cash. A typical CTC structure is made up of components such as Basic Pay, House Rent Allowance (HRA), Special Allowance, Employer's contribution to Provident Fund (PF), Gratuity, and, in several states, Labour Welfare Fund (LWF) contributions.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Why in-hand salary is lower than CTC</h3>
+    <p style="margin-bottom:16px;">The in-hand or "net" salary is what remains after mandatory deductions are subtracted from the gross monthly pay. The most common deductions are:</p>
+    <ul style="margin:0 0 16px 22px;list-style:disc;">
+      <li style="margin-bottom:6px;"><strong>Employee Provident Fund (EPF):</strong> Usually 12% of Basic Pay, deducted every month and invested for retirement.</li>
+      <li style="margin-bottom:6px;"><strong>Professional Tax:</strong> A small state-level tax, applicable in states like Maharashtra, Karnataka, and West Bengal.</li>
+      <li style="margin-bottom:6px;"><strong>Labour Welfare Fund (LWF):</strong> A nominal, mostly half-yearly contribution mandated in several states to fund welfare schemes for workers.</li>
+      <li style="margin-bottom:6px;"><strong>Income Tax (TDS):</strong> Deducted based on the employee's tax slab, exemptions claimed, and chosen tax regime (old vs. new).</li>
+    </ul>
+    <p style="margin-bottom:16px;">Because employer PF contribution, gratuity, and sometimes insurance premiums are part of CTC but never paid out as monthly cash, the in-hand figure can be noticeably lower than CTC divided by twelve.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">What is Labour Welfare Fund (LWF)?</h3>
+    <p style="margin-bottom:16px;">LWF is a statutory contribution collected by certain state governments from both employer and employee to finance welfare activities for the labour class — housing, healthcare camps, education assistance, and recreational facilities. The contribution amount and frequency (monthly, half-yearly, or annual) vary by state, and not every state mandates it. Because it is small in absolute terms, it is frequently overlooked in manual salary calculations, which is why this tool factors it in automatically.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">How to use this Salary Analyzer</h3>
+    <p style="margin-bottom:16px;">Enter your annual or monthly CTC, choose your state (for accurate Professional Tax and LWF slabs), and select any applicable benefits or deduction preferences. The tool instantly breaks your package down into Basic, HRA, allowances, employer contributions, and statutory deductions, then shows your estimated monthly and annual in-hand salary. You can export the breakdown as an Excel sheet or PDF salary slip, or copy a quick summary to share with family or a recruiter.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">A quick note on accuracy</h3>
+    <p>This calculator is designed to give a realistic estimate based on commonly used salary structuring practices in India. Actual figures may vary depending on your specific company's HR policy, applicable state rules, and the tax regime you opt for. For binding financial or tax decisions, please verify the numbers with your HR/payroll team or a qualified chartered accountant.</p>
+  </section>
+
+  <section id="faq" class="sc-reveal" style="margin-bottom:56px;">
+    <h2 class="font-display" style="color:var(--ink);font-size:24px;margin-bottom:18px;">Frequently Asked Questions</h2>
+
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Is CTC the same as my monthly salary?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">No. CTC is an annual figure representing the company's total cost, including parts you don't receive as cash monthly (like employer PF and gratuity). Your monthly in-hand salary is always lower than CTC ÷ 12.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Does every state charge Labour Welfare Fund?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">No, LWF applicability, contribution amount, and collection frequency differ by state. Some states like Uttar Pradesh and Delhi have no LWF scheme at all, while others collect it monthly or half-yearly.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Why is my employer's PF contribution part of my CTC?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">Employers structure CTC to reflect their complete cost of employing you, which includes their own statutory contributions on your behalf, even though that money doesn't appear in your bank account each month.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Can I reduce my tax deduction legally?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">Yes, through eligible exemptions and deductions under the old tax regime (like HRA exemption, Section 80C investments, and NPS contributions) or by comparing your tax liability under the new regime. This tool gives an estimate; a tax advisor can help optimise further.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Is my data saved anywhere when I use this calculator?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">No. All calculations run locally in your browser. Nothing you enter is transmitted to or stored on any server. See our Privacy Policy below for details.</p></div>
+    </div>
+  </section>
+
+  <section id="about" class="sc-reveal" style="margin-bottom:56px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <svg class="sc-icon" width="36" height="36" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="8" r="3.2" stroke="var(--indigo-soft)" stroke-width="1.5"/>
+        <path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5" stroke="var(--indigo-soft)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2 class="font-display" style="color:var(--ink);font-size:22px;margin:0;">About Us</h2>
+    </div>
+    <p>Salary Analyzer was built to remove the guesswork from Indian salary structuring. Designed and developed by Harsh Agarwal, this free tool is aimed at HR professionals, job seekers, and salaried employees who want a clear, instant breakdown of their CTC into real, in-hand take-home pay — including often-overlooked components like state-specific Labour Welfare Fund contributions. The goal is simple: make salary structures understandable to everyone, not just payroll specialists.</p>
+  </section>
+
+  <section id="privacy" class="sc-reveal" style="margin-bottom:56px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <svg class="sc-icon" width="36" height="36" viewBox="0 0 24 24" fill="none">
+        <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" stroke="var(--emerald)" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      <h2 class="font-display" style="color:var(--ink);font-size:22px;margin:0;">Privacy Policy</h2>
+    </div>
+    <p style="margin-bottom:14px;"><em>Last updated: 2026</em></p>
+    <p style="margin-bottom:14px;">We respect your privacy. This website ("Salary Analyzer") does not require you to sign up, log in, or submit any personal information to use the salary calculator. All figures you enter (CTC, allowances, state, etc.) are processed entirely within your own browser and are never transmitted to, or stored on, any external server.</p>
+    <p style="margin-bottom:14px;"><strong>Local storage:</strong> We use your browser's local storage only to remember your preferred display theme (light/dark). This data stays on your device and is never shared.</p>
+    <p style="margin-bottom:14px;"><strong>Advertising and cookies:</strong> This site uses Google AdSense to display advertisements. Google and its partners may use cookies and similar technologies to serve ads based on your prior visits to this or other websites. You can opt out of personalised advertising by visiting Google's Ads Settings, or by visiting www.aboutads.info. This site follows the standard Google Publisher Policies for ad-supported content.</p>
+    <p style="margin-bottom:14px;"><strong>Analytics:</strong> We may use aggregated, anonymised analytics (such as Google Analytics) to understand overall site traffic and improve the tool. This data does not personally identify you.</p>
+    <p>If you have any questions about this Privacy Policy, please reach out via the Contact section below.</p>
+  </section>
+
+  <section id="terms" class="sc-reveal" style="margin-bottom:56px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <svg class="sc-icon" width="36" height="36" viewBox="0 0 24 24" fill="none">
+        <rect x="5" y="3" width="14" height="18" rx="2" stroke="var(--gold-soft)" stroke-width="1.5"/>
+        <path d="M8 8h8M8 12h8M8 16h5" stroke="var(--gold-soft)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2 class="font-display" style="color:var(--ink);font-size:22px;margin:0;">Terms &amp; Conditions</h2>
+    </div>
+    <p style="margin-bottom:14px;">By using Salary Analyzer, you agree to the following terms:</p>
+    <ul style="margin:0 0 14px 22px;list-style:disc;">
+      <li style="margin-bottom:6px;">This tool provides estimated salary calculations for informational purposes only and does not constitute financial, tax, or legal advice.</li>
+      <li style="margin-bottom:6px;">While we aim for accuracy, actual salary structures, tax slabs, and statutory contributions (PF, LWF, Professional Tax) may vary by employer, state, and financial year. Always verify figures with your employer's HR/payroll team or a qualified professional.</li>
+      <li style="margin-bottom:6px;">We are not liable for any decisions made solely on the basis of estimates produced by this calculator.</li>
+      <li style="margin-bottom:6px;">The content, design, and code of this website are the property of Salary Analyzer and may not be reproduced without permission.</li>
+      <li>We reserve the right to update these terms, the calculator's logic, or the site's content at any time without prior notice.</li>
+    </ul>
+  </section>
+
+
+</div>
+
+<script>
+  // Scroll-reveal animation for the static content sections
+  (function () {
+    var els = document.querySelectorAll('#site-content .sc-reveal');
+    if (!('IntersectionObserver' in window)) {
+      els.forEach(function (el) { el.classList.add('sc-visible'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('sc-visible');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>
+
 <script>
 try {
 if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
@@ -346,7 +594,8 @@ const {
   useState,
   useMemo,
   useEffect,
-  useRef
+  useRef,
+  useCallback
 } = React;
 
 /* ============== BRAND LOGO (HA monogram) ============== */
@@ -1833,7 +2082,7 @@ function HeroCTA({
       height: '18px',
       borderWidth: '2px'
     }
-  }) : null, loading ? 'Calculating…' : 'Calculate In-Hand Salary →'), /*#__PURE__*/React.createElement("div", {
+  }) : null, loading ? 'Calculating…' : 'Know Your In-Hand Salary →'), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap justify-center gap-x-5 gap-y-2 mt-8"
   }, features.map(f => /*#__PURE__*/React.createElement("span", {
     key: f,
@@ -2550,6 +2799,94 @@ function Modal({
   }, "✕"), children)), document.body);
 }
 
+/* ============== "KNOW YOUR IN-HAND SALARY" CALCULATION OVERLAY (shared) ==============
+   A brief, non-dismissable overlay shown for the short window between the user
+   clicking "Know Your In-Hand Salary" and the result becoming visible. Purely
+   presentational — it does not change when/what is calculated, it just gives
+   that moment a polished, deliberate feel instead of an instant jump-cut.
+   The important state ("Calculating…") is also announced via aria-live so
+   screen reader users get the same information non-visually. */
+function CalculatingOverlay({
+  open
+}) {
+  if (!open) return null;
+  return ReactDOM.createPortal(/*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 z-[300] flex items-center justify-center p-4",
+    style: {
+      background: 'rgba(0,0,0,0.55)',
+      backdropFilter: 'blur(4px)'
+    },
+    role: "presentation"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "glass w-full max-w-xs rounded-2xl p-8 text-center calc-overlay-pop",
+    role: "status",
+    "aria-live": "polite",
+    "aria-atomic": "true"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "calc-overlay-coin",
+    "aria-hidden": "true"
+  }, "₹"), /*#__PURE__*/React.createElement("div", {
+    className: "font-display italic txt-sh mt-5",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Calculating your in-hand salary…"), /*#__PURE__*/React.createElement("div", {
+    className: "txt-b mt-2",
+    style: {
+      color: 'var(--ink-faint)'
+    }
+  }, "PF · ESIC · Gratuity · Tax — almost done"))), document.body);
+}
+
+/* ============== "KNOW YOUR IN-HAND SALARY": compact summary bar (shared) ==============
+   Shown in place of the full A–D basic-details cards once the user has
+   calculated their in-hand salary. Keeps the chosen values visible at a
+   glance and offers a clear way back into the full editable form — the
+   underlying state is never cleared, only its visibility toggles. */
+function KyihsSummaryBar({
+  chips,
+  onEdit
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "glass card-hover rounded-2xl p-5 kyihs-summary-bar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-3 mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-1.5 h-1.5 rounded-full",
+    style: {
+      background: 'var(--emerald)'
+    },
+    "aria-hidden": "true"
+  }), /*#__PURE__*/React.createElement("h2", {
+    className: "font-display italic txt-sh",
+    style: {
+      color: 'var(--ink)'
+    }
+  }, "Your Basic Details")), /*#__PURE__*/React.createElement("button", {
+    onClick: onEdit,
+    className: "flex items-center gap-1.5 rounded-xl font-semibold",
+    style: {
+      padding: '8px 14px',
+      fontSize: '13px',
+      minHeight: '38px',
+      background: 'color-mix(in srgb, var(--indigo) 10%, var(--input-bg))',
+      border: '1px solid var(--line)',
+      color: 'var(--ink)'
+    },
+    "aria-label": "Edit basic salary details"
+  }, "✎ Edit")), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-2"
+  }, chips.filter(Boolean).map((c, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "chip",
+    style: {
+      fontSize: '12.5px'
+    }
+  }, c.label, ": ", /*#__PURE__*/React.createElement("strong", null, c.value)))));
+}
+
 /* ============== PERCENTAGE ANALYSIS (shared) ============== */
 function PercentageAnalysis({
   result
@@ -2607,14 +2944,30 @@ function PercentageAnalysis({
   }, r.value.toFixed(1), "%")))));
 }
 
-/* ============== SHARED HEADER (both calculator pages) ============== */
+/* ============== SHARED HEADER (both calculator pages) ==============
+   Layout: [Back button] [Logo + "Salary Analyzer" brand (clickable → home)]
+   on the left, [title chip] [FY chip] [theme switch] on the right. The back
+   button lives on its own at the top-left, clearly separated from the
+   right-side controls, and never overlaps the calculator content below it.
+   The brand/logo is a real, clickable, keyboard-accessible home link that is
+   distinct from the browser's native Back button: clicking it always takes
+   the user to the Salary Analyzer dashboard, while the browser Back button
+   walks real browser history (see the popstate handling in the app root). */
 function AppHeader({
   title,
   subtitle,
   theme,
   setTheme,
-  setView
+  setView,
+  showBack = true
 }) {
+  const goHome = () => setView('landing');
+  const goHomeKeyDown = e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      goHome();
+    }
+  };
   return /*#__PURE__*/React.createElement("header", {
     className: "sticky top-0 z-40 border-b backdrop-blur-xl",
     style: {
@@ -2625,6 +2978,34 @@ function AppHeader({
     className: "max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-10 py-4 flex items-center justify-between gap-2"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 sm:gap-3 min-w-0"
+  }, showBack && /*#__PURE__*/React.createElement("button", {
+    onClick: goHome,
+    "aria-label": "Back to tool selection",
+    className: "flex items-center gap-1.5 rounded-xl font-semibold back-btn flex-shrink-0",
+    style: {
+      padding: '10px 14px',
+      fontSize: '13.5px',
+      minHeight: '44px',
+      background: 'color-mix(in srgb, var(--indigo) 10%, var(--input-bg))',
+      border: '1px solid var(--line)',
+      color: 'var(--ink)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '16px'
+    }
+  }, "←"), /*#__PURE__*/React.createElement("span", {
+    className: "back-btn-label"
+  }, "Back")), /*#__PURE__*/React.createElement("div", {
+    onClick: goHome,
+    onKeyDown: goHomeKeyDown,
+    role: "link",
+    tabIndex: 0,
+    "aria-label": "Salary Analyzer home — go to the calculator dashboard",
+    className: "flex items-center gap-2 sm:gap-3 min-w-0 brand-home-link",
+    style: {
+      cursor: 'pointer'
+    }
   }, /*#__PURE__*/React.createElement("img", {
     src: LOGO_SQUARE,
     alt: "Salary Analyzer logo",
@@ -2644,31 +3025,13 @@ function AppHeader({
       color: 'var(--gold-soft)'
     }
   }, ".")), /*#__PURE__*/React.createElement("div", {
-    className: "txt-b tracking-[0.2em] uppercase mt-1 truncate hidden xs-header-subtitle",
+    className: "txt-b tracking-[0.2em] uppercase mt-1 truncate",
     style: {
       color: 'var(--ink-faint)'
     }
-  }, "Salary Calculator"))), /*#__PURE__*/React.createElement("div", {
+  }, title ? title.replace(/^[^\w]*\s*/, '') : "Salary Calculator")))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 flex-shrink-0"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setView('landing'),
-    "aria-label": "Back to tool selection",
-    className: "flex items-center gap-1.5 rounded-xl font-semibold back-btn",
-    style: {
-      padding: '10px 16px',
-      fontSize: '13.5px',
-      minHeight: '44px',
-      background: 'color-mix(in srgb, var(--indigo) 10%, var(--input-bg))',
-      border: '1px solid var(--line)',
-      color: 'var(--ink)'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: '16px'
-    }
-  }, "←"), /*#__PURE__*/React.createElement("span", {
-    className: "back-btn-label"
-  }, "Back")), /*#__PURE__*/React.createElement("div", {
+  }, title && /*#__PURE__*/React.createElement("div", {
     className: "hidden lg:flex items-center gap-2 chip"
   }, title), /*#__PURE__*/React.createElement("div", {
     className: "hidden md:flex items-center gap-2 chip"
@@ -2698,7 +3061,43 @@ function AppHeader({
    below this point except for the header user-menu and the new 'profile'
    view added later in the view switch) ============== */
 function SalaryAnalyzerApp() {
-  const [theme, setTheme] = useState('light');
+  // ===== Theme: manual selection (persisted) takes priority; otherwise follow
+  // the OS/browser color-scheme preference automatically, live. =====
+  const [theme, setThemeState] = useState(() => {
+    try {
+      var saved = localStorage.getItem('sa-theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch (e) {}
+    try {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    } catch (e) {}
+    return 'light';
+  });
+  const setTheme = useCallback(t => {
+    setThemeState(t);
+    try {
+      localStorage.setItem('sa-theme', t);
+    } catch (e) {}
+  }, []);
+  // Follow live OS/browser theme changes, but only when the user hasn't
+  // explicitly picked a theme inside Salary Analyzer.
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleSystemChange = e => {
+      let manual = null;
+      try {
+        manual = localStorage.getItem('sa-theme');
+      } catch (err) {}
+      if (manual !== 'dark' && manual !== 'light') {
+        setThemeState(e.matches ? 'dark' : 'light');
+      }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', handleSystemChange);else mq.addListener(handleSystemChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', handleSystemChange);else mq.removeListener(handleSystemChange);
+    };
+  }, []);
 
   // ===== Global button ripple effect (event delegation, no re-renders) =====
   useEffect(() => {
@@ -2746,6 +3145,49 @@ function SalaryAnalyzerApp() {
   const [companyName, setCompanyName] = useState('');
   const [appShown, setAppShown] = useState(false);
   const [view, setView] = useState('landing'); // 'landing' | 'ctc' | 'manual' | 'labour'
+
+  // ===== Real browser back/forward support =====
+  // Every view change pushes a history entry so the browser's native Back
+  // button steps through Salary Analyzer's screens naturally (without
+  // replacing/breaking normal browser history). Navigating via popstate
+  // (Back/Forward) updates `view` directly instead of pushing a new entry.
+  const isPopNavRef = useRef(false);
+  const historyInitRef = useRef(false);
+  useEffect(() => {
+    if (!historyInitRef.current) {
+      historyInitRef.current = true;
+      try {
+        history.replaceState({
+          saView: 'landing'
+        }, '', location.pathname + location.search);
+      } catch (e) {}
+      return;
+    }
+    if (isPopNavRef.current) {
+      isPopNavRef.current = false;
+      return;
+    }
+    try {
+      history.pushState({
+        saView: view
+      }, '', view === 'landing' ? location.pathname + location.search : '#' + view);
+    } catch (e) {}
+  }, [view]);
+  useEffect(() => {
+    const onPopState = e => {
+      isPopNavRef.current = true;
+      setView(e.state && e.state.saView ? e.state.saView : 'landing');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Always land at the very top of the page whenever the screen changes —
+  // opening any of the three calculators (or going back to the dashboard)
+  // should never start the user mid-scroll.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [view]);
 
   // ===== New Labour Code mode state (reuses ctcRaw, mode, basicPct, hraPct,
   // conveyance, stateName, pfOn, pfMode, employerPFPct, gratuityOn, esicOn,
@@ -3117,8 +3559,14 @@ function SalaryAnalyzerApp() {
         opacity: appShown ? 1 : 0,
         transform: appShown ? 'translateY(0)' : 'translateY(8px)',
         transition: 'opacity 900ms ease, transform 900ms ease'
-      },
-      className: "min-h-screen flex items-center justify-center px-6 relative overflow-hidden"
+      }
+    }, /*#__PURE__*/React.createElement(AppHeader, {
+      theme: theme,
+      setTheme: setTheme,
+      setView: setView,
+      showBack: false
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "min-h-[calc(100vh-84px)] flex items-center justify-center px-6 py-10 sm:py-14 relative overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
       className: "absolute top-[-10%] left-[10%] w-72 h-72 rounded-full blur-3xl pointer-events-none",
       style: {
@@ -3292,7 +3740,7 @@ function SalaryAnalyzerApp() {
       style: {
         color: 'var(--gold-soft)'
       }
-    }, "Open Calculator →")))));
+    }, "Open Calculator →"))))));
   }
   if (view === 'labour') {
   const lCircumference = 527.8;
@@ -3305,7 +3753,9 @@ function SalaryAnalyzerApp() {
       transform: appShown ? 'translateY(0)' : 'translateY(8px)',
       transition: 'opacity 900ms ease, transform 900ms ease'
     }
-  }, /*#__PURE__*/React.createElement(AppHeader, {
+  }, /*#__PURE__*/React.createElement(CalculatingOverlay, {
+    open: lLoading
+  }), /*#__PURE__*/React.createElement(AppHeader, {
     title: "⚖️ New Labour Code Calculation",
     subtitle: "Code on Wages · 50% Add-Back",
     theme: theme,
@@ -3315,7 +3765,20 @@ function SalaryAnalyzerApp() {
     className: "max-w-[1400px] mx-auto px-6 lg:px-10 py-10 grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-7"
   }, /*#__PURE__*/React.createElement("aside", {
     className: "space-y-7 xl:sticky xl:top-24 h-fit"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/lHasCalculated && /*#__PURE__*/React.createElement(KyihsSummaryBar, {
+    onEdit: () => setLHasCalculated(false),
+    chips: [
+        { label: 'CTC', value: (mode === 'monthly' ? 'Monthly ' : 'Annual ') + '₹' + formatNumber(ctcRaw) },
+        { label: 'City', value: cityType === 'metro' ? 'Metro' : 'Non-Metro' },
+        { label: 'State', value: stateName },
+        { label: 'PF', value: pfOn ? 'Applicable' : 'Not Applicable' },
+        { label: 'DA', value: daPct + '%' }
+      ]
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "kyihs-collapsible " + (lHasCalculated ? "is-collapsed" : "is-open"),
+    "aria-hidden": lHasCalculated ? "true" : "false",
+    inert: lHasCalculated ? 'true' : undefined
+  }, /*#__PURE__*/React.createElement("div", null, React.createElement("div", {
     className: "glass card-hover rounded-2xl p-6"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-5"
@@ -3756,7 +4219,7 @@ function SalaryAnalyzerApp() {
     style: {
       color: 'var(--ink-faint)'
     }
-  }, "This does not mean Basic Salary must automatically be 50% of CTC. Where excluded components (HRA, conveyance, special allowance etc.) exceed the permitted 50% portion of remuneration, the excess is added back to wages for statutory PF/ESIC calculations only — Basic itself is unchanged."))), /*#__PURE__*/React.createElement("section", {
+  }, "This does not mean Basic Salary must automatically be 50% of CTC. Where excluded components (HRA, conveyance, special allowance etc.) exceed the permitted 50% portion of remuneration, the excess is added back to wages for statutory PF/ESIC calculations only — Basic itself is unchanged."))))), /*#__PURE__*/React.createElement("section", {
     className: "space-y-7"
   }, !lHasCalculated ? /*#__PURE__*/React.createElement(HeroCTA, {
     onCalculate: handleCalculateLabour,
@@ -4535,7 +4998,9 @@ function SalaryAnalyzerApp() {
         transform: appShown ? 'translateY(0)' : 'translateY(8px)',
         transition: 'opacity 900ms ease, transform 900ms ease'
       }
-    }, /*#__PURE__*/React.createElement(AppHeader, {
+    }, /*#__PURE__*/React.createElement(CalculatingOverlay, {
+      open: manualLoading
+    }), /*#__PURE__*/React.createElement(AppHeader, {
       title: "⚙️ Custom Salary Builder",
       subtitle: "HR Editable Salary Heads",
       theme: theme,
@@ -4545,7 +5010,19 @@ function SalaryAnalyzerApp() {
       className: "max-w-[1400px] mx-auto px-6 lg:px-10 py-10 pb-28 lg:pb-10 grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-7"
     }, /*#__PURE__*/React.createElement("aside", {
       className: "space-y-7 xl:sticky xl:top-24 h-fit"
-    }, /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/mHasCalculated && /*#__PURE__*/React.createElement(KyihsSummaryBar, {
+    onEdit: () => setMHasCalculated(false),
+    chips: [
+        { label: 'CTC', value: (mCtcMode === 'monthly' ? 'Monthly ' : 'Annual ') + '₹' + formatNumber(mCtcRaw) },
+        { label: 'City', value: mCityType === 'metro' ? 'Metro' : 'Non-Metro' },
+        { label: 'State', value: mPtState },
+        { label: 'PF', value: mPfOn ? 'Applicable' : 'Not Applicable' }
+      ]
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "kyihs-collapsible " + (mHasCalculated ? "is-collapsed" : "is-open"),
+    "aria-hidden": mHasCalculated ? "true" : "false",
+    inert: mHasCalculated ? 'true' : undefined
+  }, /*#__PURE__*/React.createElement("div", null, React.createElement("div", {
       className: "glass card-hover rounded-2xl p-6"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center justify-between mb-5"
@@ -4924,7 +5401,7 @@ function SalaryAnalyzerApp() {
       style: {
         color: 'var(--ink-faint)'
       }
-    }, LWF_TABLE[mPtState].type === 'percent' ? ("Employee 0.2% of wages (max ₹" + LWF_TABLE[mPtState].employeeCap + "/mo) · Employer 2× employee (max ₹" + LWF_TABLE[mPtState].employerCap + "/mo).") : ("Employee ₹" + LWF_TABLE[mPtState].employee + " · Employer ₹" + LWF_TABLE[mPtState].employer + " per " + LWF_TABLE[mPtState].frequency.toLowerCase() + " cycle. Uses the state selected for Professional Tax."))))), /*#__PURE__*/React.createElement("section", {
+    }, LWF_TABLE[mPtState].type === 'percent' ? ("Employee 0.2% of wages (max ₹" + LWF_TABLE[mPtState].employeeCap + "/mo) · Employer 2× employee (max ₹" + LWF_TABLE[mPtState].employerCap + "/mo).") : ("Employee ₹" + LWF_TABLE[mPtState].employee + " · Employer ₹" + LWF_TABLE[mPtState].employer + " per " + LWF_TABLE[mPtState].frequency.toLowerCase() + " cycle. Uses the state selected for Professional Tax."))))))), /*#__PURE__*/React.createElement("section", {
       className: "space-y-7"
     }, !mHasCalculated ? /*#__PURE__*/React.createElement(HeroCTA, {
       onCalculate: handleCalculateManual,
@@ -5254,7 +5731,9 @@ function SalaryAnalyzerApp() {
       transform: appShown ? 'translateY(0)' : 'translateY(8px)',
       transition: 'opacity 900ms ease, transform 900ms ease'
     }
-  }, /*#__PURE__*/React.createElement(AppHeader, {
+  }, /*#__PURE__*/React.createElement(CalculatingOverlay, {
+    open: ctcLoading
+  }), /*#__PURE__*/React.createElement(AppHeader, {
     title: "⚡ Smart Salary Builder",
     subtitle: "Indian Payroll Engine",
     theme: theme,
@@ -5264,7 +5743,19 @@ function SalaryAnalyzerApp() {
     className: "max-w-[1400px] mx-auto px-6 lg:px-10 py-10 grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-7"
   }, /*#__PURE__*/React.createElement("aside", {
     className: "space-y-7 xl:sticky xl:top-24 h-fit"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/hasCalculated && /*#__PURE__*/React.createElement(KyihsSummaryBar, {
+    onEdit: () => setHasCalculated(false),
+    chips: [
+        { label: 'CTC', value: (mode === 'monthly' ? 'Monthly ' : 'Annual ') + '₹' + formatNumber(ctcRaw) },
+        { label: 'City', value: cityType === 'metro' ? 'Metro' : 'Non-Metro' },
+        { label: 'State', value: stateName },
+        { label: 'PF', value: pfOn ? 'Applicable' : 'Not Applicable' }
+      ]
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "kyihs-collapsible " + (hasCalculated ? "is-collapsed" : "is-open"),
+    "aria-hidden": hasCalculated ? "true" : "false",
+    inert: hasCalculated ? 'true' : undefined
+  }, /*#__PURE__*/React.createElement("div", null, React.createElement("div", {
     className: "glass card-hover rounded-2xl p-6"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-5"
@@ -5627,7 +6118,7 @@ function SalaryAnalyzerApp() {
     style: {
       color: 'var(--ink-faint)'
     }
-  }, result.bonusEligible ? `Eligible — computed on wage ceiling of ₹${formatNumber(7000)}/month, paid annually.` : `Basic exceeds ₹21,000/month — not statutorily eligible for bonus.`)))), /*#__PURE__*/React.createElement("section", {
+  }, result.bonusEligible ? `Eligible — computed on wage ceiling of ₹${formatNumber(7000)}/month, paid annually.` : `Basic exceeds ₹21,000/month — not statutorily eligible for bonus.`)))))), /*#__PURE__*/React.createElement("section", {
     className: "space-y-7"
   }, !hasCalculated ? /*#__PURE__*/React.createElement(HeroCTA, {
     onCalculate: handleCalculateCtc,
