@@ -3285,6 +3285,7 @@ function CurrencyInput({
   value,
   onChange,
   onBlur,
+  onFocus,
   min,
   max,
   step,
@@ -3328,9 +3329,30 @@ function CurrencyInput({
     },
     onChange: onChange,
     onBlur: onBlur,
+    onFocus: onFocus,
     onKeyDown: type === 'number' ? blockInvalidNumberKeys : undefined,
     onWheel: type === 'number' ? blurOnWheel : undefined
   }));
+}
+/* Custom Calculator salary-head input: keeps the raw typed string while editing so the
+   field can be cleared / retyped freely (no instant "0"). The numeric state is still
+   updated on every valid keystroke exactly as before (blank => 0 for calculations). */
+function HeadAmountInput({
+  value,
+  onCommit
+}) {
+  const [draft, setDraft] = React.useState(null);
+  return /*#__PURE__*/React.createElement(CurrencyInput, {
+    value: draft !== null ? draft : value,
+    min: "0",
+    step: "100",
+    onChange: e => {
+      const t = e.target.value;
+      setDraft(t);
+      onCommit(parseFloat(t) || 0);
+    },
+    onBlur: () => setDraft(null)
+  });
 }
 function Modal({
   open,
@@ -4557,9 +4579,20 @@ function SalaryAnalyzerApp() {
     employeePfLabel: pfOn ? 'Employee PF Contribution (12%)' : 'Employee PF (Not Deducted)'
   };
   function handleMCtcInput(e) {
-    const raw = parseCurrency(e.target.value);
-    setMCtcRaw(raw);
-    setMCtcDisplay(raw ? formatNumber(raw) : '');
+    // Keep the user's raw string (digits + optional single dot) so the caret is never disturbed;
+    // commas are stripped from pasted text. Numeric value is derived separately.
+    let t = e.target.value.replace(/[^0-9.]/g, '');
+    const dot = t.indexOf('.');
+    if (dot !== -1) t = t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, '');
+    const parts = t.split('.');
+    parts[0] = parts[0].slice(0, 15);
+    t = parts.join('.');
+    setMCtcDisplay(t);
+    setMCtcRaw(parseFloat(t) || 0);
+  }
+  function handleMCtcFocus() {
+    // Show the plain number while editing (commas would shift the caret).
+    setMCtcDisplay(mCtcRaw ? String(+mCtcRaw.toFixed(2)) : '');
   }
   function handleMCtcBlur() {
     setMCtcDisplay(mCtcRaw ? formatNumber(mCtcRaw) : '');
@@ -6015,6 +6048,7 @@ function SalaryAnalyzerApp() {
       value: mCtcDisplay,
       fontSize: "16px",
       onChange: handleMCtcInput,
+      onFocus: handleMCtcFocus,
       onBlur: handleMCtcBlur
     })), /*#__PURE__*/React.createElement("div", {
       className: "grid grid-cols-2 gap-4 mb-4"
@@ -6061,11 +6095,9 @@ function SalaryAnalyzerApp() {
       key: i
     }, /*#__PURE__*/React.createElement("label", {
       className: "field-label block mb-2"
-    }, label), /*#__PURE__*/React.createElement(CurrencyInput, {
+    }, label), /*#__PURE__*/React.createElement(HeadAmountInput, {
       value: val,
-      min: "0",
-      step: "100",
-      onChange: e => setter(parseFloat(e.target.value) || 0)
+      onCommit: setter
     }))), /*#__PURE__*/React.createElement("div", {
       className: "rounded-xl px-4 py-3",
       style: {
