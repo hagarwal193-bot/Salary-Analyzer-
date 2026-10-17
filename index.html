@@ -429,7 +429,8 @@
   [data-theme="dark"] .sa-d .sa-logo{background:#fff;padding:4px}
   .sa-d .brand-txt{display:flex;flex-direction:column;line-height:1.1}
   .sa-d .brand-name{font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:25px;white-space:nowrap;color:var(--s-ink);letter-spacing:-.01em}
-  .sa-d .brand-tag{font-size:13px;color:var(--s-ink);margin-top:3px}
+  .sa-d .brand-tag{font-size:13px;color:var(--s-ink);margin-top:3px;display:inline-block;animation:scTagIn 1.1s .25s cubic-bezier(.16,1,.3,1) both}
+  @keyframes scTagIn{0%{opacity:0;transform:translateY(6px);letter-spacing:.02em}60%{opacity:1}100%{opacity:1;transform:translateY(0);letter-spacing:normal}}
   .sa-d .sa-nav{display:flex;align-items:center;gap:6px;margin-left:12px;flex:1}
   .sa-d .sa-nav>a,.sa-d .navbtn{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;background:none;border:0;color:var(--s-ink);text-decoration:none;font-size:14.5px;font-weight:500;padding:10px 10px;border-radius:10px;transition:background .2s,color .2s}
   .sa-d .sa-nav>a:hover,.sa-d .navbtn:hover{background:var(--s-tint);color:var(--s-blue)}
@@ -749,6 +750,22 @@
   .sa-d .ab-dev h2{margin:0;color:#fff;font-family:'Source Serif 4',serif;font-size:22px}
   .sa-d .ab-dev p{margin:4px 0 0;color:#D6F0F2;font-size:14px}
   .sa-d .ab-grid,.sa-d .g-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:24px}
+  .sa-d .ab-grid>article,.sa-d .g-stats>article{animation:saUp .6s both}
+  .sa-d .ab-grid>article:nth-child(1),.sa-d .g-stats>article:nth-child(1){animation-delay:.06s}
+  .sa-d .ab-grid>article:nth-child(2),.sa-d .g-stats>article:nth-child(2){animation-delay:.12s}
+  .sa-d .ab-grid>article:nth-child(3),.sa-d .g-stats>article:nth-child(3){animation-delay:.18s}
+  .sa-d .ab-grid>article:nth-child(4),.sa-d .g-stats>article:nth-child(4){animation-delay:.24s}
+  .sa-d .ab-grid>article:hover,.sa-d .g-stats>article:hover{transform:translateY(-3px);box-shadow:var(--s-shadow);transition:transform .25s ease,box-shadow .25s ease}
+  .sa-d .glance{animation:saUp .6s .02s both}
+  .sa-d .glance li{transition:transform .2s ease}
+  .sa-d .glance li:hover{transform:translateY(-2px)}
+  .sa-d .lg-card{animation:saUp .55s both}
+  .sa-d .lg-card:nth-child(1){animation-delay:.04s}.sa-d .lg-card:nth-child(2){animation-delay:.09s}.sa-d .lg-card:nth-child(3){animation-delay:.14s}.sa-d .lg-card:nth-child(4){animation-delay:.19s}.sa-d .lg-card:nth-child(5){animation-delay:.24s}.sa-d .lg-card:nth-child(6){animation-delay:.29s}
+  .sa-d .lg-card:hover{transform:translateX(3px);transition:transform .25s ease}
+  .sa-d .ab-dev{animation:saUp .65s .1s both;transition:transform .3s ease}
+  .sa-d .ab-dev:hover{transform:translateY(-4px)}
+  .sa-d .qa{animation:saUp .5s both}
+  .sa-d .pg-hero{animation:scFadeIn .6s ease both}
   .sa-d .g-stats{margin:0 0 30px}
   .sa-d .ab-t{padding:20px;border-top:4px solid var(--k)}
   .sa-d .ab-t.c1{--k:#1565C0}.sa-d .ab-t.c2{--k:#5B3FC4}.sa-d .ab-t.c3{--k:#1E9E4A}.sa-d .ab-t.c4{--k:#F28C1A}
@@ -919,6 +936,24 @@
     <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">How to use this Salary Analyzer</h3>
     <p style="margin-bottom:16px;">Enter your annual or monthly CTC, choose your state (for accurate Professional Tax and LWF slabs), and select any applicable benefits or deduction preferences. The tool instantly breaks your package down into Basic, HRA, allowances, employer contributions, and statutory deductions, then shows your estimated monthly and annual in-hand salary. You can export the breakdown as an Excel sheet or PDF salary slip, or copy a quick summary to share with family or a recruiter.</p>
 
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Employee State Insurance (ESI): who it applies to</h3>
+    <p style="margin-bottom:16px;">ESI is a self-financing health insurance scheme that applies to employees earning up to ₹21,000 a month in gross salary (₹25,000 for persons with disabilities), working at establishments covered under the ESI Act. Where applicable, the employee contributes 0.75% of gross wages and the employer contributes 3.25%, funding medical care, sickness benefit, and maternity benefit. Once your gross salary crosses the threshold, ESI deduction stops from the following contribution period, which is why some employees see it disappear after an appraisal.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Professional Tax: a state-by-state deduction</h3>
+    <p style="margin-bottom:16px;">Professional Tax is levied by state governments on salaried individuals, capped by law at ₹2,500 per year. Slabs and even applicability vary widely — Maharashtra, Karnataka, West Bengal, Andhra Pradesh, Telangana, Tamil Nadu, Gujarat, Madhya Pradesh, and a few other states collect it monthly on a slab basis, while states like Delhi, Haryana, Uttar Pradesh, and Punjab currently don't levy it at all. Because the rule changes at the state border, two employees with identical CTC in different cities can see a different in-hand number purely because of Professional Tax.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Gratuity: the long-service benefit hidden inside CTC</h3>
+    <p style="margin-bottom:16px;">Gratuity is a lump-sum benefit paid by the employer when an employee completes five or more years of continuous service (with some exceptions for death or disability). It is commonly calculated as (Basic + DA) × 15/26 × number of years of service, and many companies include an accrual for it inside the CTC figure even though you only receive it on exit. This is one more reason CTC and in-hand pay don't match — gratuity is money set aside for the future, not paid monthly.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Old tax regime vs New tax regime</h3>
+    <p style="margin-bottom:16px;">India currently allows salaried taxpayers to choose between two income-tax regimes each financial year. The <strong>old regime</strong> has higher slab rates but allows exemptions and deductions such as HRA exemption, Section 80C (PF, ELSS, life insurance, etc. up to ₹1.5 lakh), 80D (health insurance), and home loan interest. The <strong>new regime</strong> offers lower slab rates and a higher basic exemption, but strips out almost all exemptions and deductions. Which one leaves more in-hand depends entirely on how many deductions you actually claim — someone with a home loan and active 80C investments often does better under the old regime, while someone with few investments usually nets more under the new regime. This calculator lets you compare both so you aren't guessing.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Reading your salary slip and Form 16</h3>
+    <p style="margin-bottom:16px;">Your monthly salary slip lists each earning component (Basic, HRA, Special Allowance, etc.) on one side and each deduction (PF, Professional Tax, TDS, LWF) on the other — the difference is your net pay. At the end of the financial year, your employer issues a <strong>Form 16</strong>, a consolidated certificate showing your total salary paid, tax deducted at source (TDS), and the exemptions considered. Keeping your payslips and Form 16 together makes it far easier to file your income-tax return and to spot-check that deductions over the year match what was actually deposited with the government.</p>
+
+    <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">Negotiating CTC the right way</h3>
+    <p style="margin-bottom:16px;">When negotiating an offer, always ask for the in-hand/take-home figure in addition to the CTC number, since two offers with the same CTC can differ meaningfully in actual monthly pay depending on how much is allocated to employer PF, gratuity accrual, insurance, and variable/bonus components. A higher fixed Basic generally means higher PF deduction but also a higher gratuity base; a higher variable component increases headline CTC but adds uncertainty to your monthly cash flow. Running both offers through a calculator like this one, side by side, is usually more useful than comparing the CTC headline numbers alone.</p>
+
     <h3 class="font-display" style="color:var(--ink);font-size:18px;margin:24px 0 10px 0;">A quick note on accuracy</h3>
     <p>This calculator is designed to give a realistic estimate based on commonly used salary structuring practices in India. Actual figures may vary depending on your specific company's HR policy, applicable state rules, and the tax regime you opt for. For binding financial or tax decisions, please verify the numbers with your HR/payroll team or a qualified chartered accountant.</p>
   </section>
@@ -942,9 +977,29 @@
       <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Can I reduce my tax deduction legally?</p>
       <div class="sc-faq-a"><p style="margin-top:8px;">Yes, through eligible exemptions and deductions under the old tax regime (like HRA exemption, Section 80C investments, and NPS contributions) or by comparing your tax liability under the new regime. This tool gives an estimate; a tax advisor can help optimise further.</p></div>
     </div>
-    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;" onclick="this.classList.toggle('sc-open')">
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
       <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Is my data saved anywhere when I use this calculator?</p>
       <div class="sc-faq-a"><p style="margin-top:8px;">No. All calculations run locally in your browser. Nothing you enter is transmitted to or stored on any server. See our Privacy Policy below for details.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Why did my ESI deduction suddenly stop?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">ESI applies only while your gross monthly salary is at or below the ₹21,000 threshold. Once a salary hike takes you above that limit, the deduction (and the employer's matching contribution) stops from the next contribution period onward — it isn't an error on your payslip.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Should I choose the old or new tax regime?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">It depends on how many deductions you claim. If you have a home loan, active 80C investments, or significant HRA exemption, the old regime often works out better. With few deductions, the new regime's lower slab rates usually win. Use the calculator to compare your actual numbers under both before deciding.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Do I get gratuity if I leave before 5 years?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">Generally no — gratuity under the Payment of Gratuity Act becomes payable only after five years of continuous service, except in cases of death or disability, where the five-year condition is waived.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;margin-bottom:12px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Why do two offers with the same CTC pay differently in-hand?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">Because CTC is a total-cost figure, not a cash figure. Two companies can split the same CTC very differently between fixed pay, employer PF, gratuity accrual, insurance, and variable bonus — and only the fixed cash portion shows up in your monthly in-hand salary.</p></div>
+    </div>
+    <div class="sc-faq-item glass" style="border-radius:12px;padding:14px 16px;" onclick="this.classList.toggle('sc-open')">
+      <p class="sc-faq-q" style="color:var(--ink);font-weight:600;margin:0;">Can HR professionals use this for multiple employees?</p>
+      <div class="sc-faq-a"><p style="margin-top:8px;">Yes — the Custom Salary Builder mode lets HR and payroll teams adjust individual components per employee and export a formatted salary slip as PDF or Excel, making it useful for quick what-if structuring during offer rollouts.</p></div>
     </div>
   </section>
 
@@ -959,6 +1014,19 @@
     <p>Salary Analyzer was built to remove the guesswork from Indian salary structuring. Designed and developed by Harsh Agarwal, this free tool is aimed at HR professionals, job seekers, and salaried employees who want a clear, instant breakdown of their CTC into real, in-hand take-home pay — including often-overlooked components like state-specific Labour Welfare Fund contributions. The goal is simple: make salary structures understandable to everyone, not just payroll specialists.</p>
   </section>
 
+  <section id="contact" class="sc-reveal" style="margin-bottom:56px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <svg class="sc-icon" width="36" height="36" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="5" width="18" height="14" rx="2" stroke="var(--indigo-soft)" stroke-width="1.5"/>
+        <path d="M3 7l9 6 9-6" stroke="var(--indigo-soft)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <h2 class="font-display" style="color:var(--ink);font-size:22px;margin:0;">Contact Us</h2>
+    </div>
+    <p style="margin-bottom:14px;">Have a question, found an error in a calculation, or want to suggest a feature? We'd love to hear from you. Salary Analyzer is actively maintained, and feedback directly shapes what gets built next.</p>
+    <p style="margin-bottom:14px;">For general queries, bug reports, or privacy-related questions, write to us at <a href="mailto:hagarwal193@gmail.com" style="color:var(--indigo-soft);">hagarwal193@gmail.com</a>. We aim to respond within 2–3 business days.</p>
+    <p>You can also connect with us on LinkedIn — links are available in the footer of this site.</p>
+  </section>
+
   <section id="privacy" class="sc-reveal" style="margin-bottom:56px;">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
       <svg class="sc-icon" width="36" height="36" viewBox="0 0 24 24" fill="none">
@@ -971,7 +1039,7 @@
     <p style="margin-bottom:14px;"><strong>Local storage:</strong> We use your browser's local storage only to remember your preferred display theme (light/dark). This data stays on your device and is never shared.</p>
     <p style="margin-bottom:14px;"><strong>Advertising and cookies:</strong> This site uses Google AdSense to display advertisements. Google and its partners may use cookies and similar technologies to serve ads based on your prior visits to this or other websites. You can opt out of personalised advertising by visiting Google's Ads Settings, or by visiting www.aboutads.info. This site follows the standard Google Publisher Policies for ad-supported content.</p>
     <p style="margin-bottom:14px;"><strong>Analytics:</strong> We may use aggregated, anonymised analytics (such as Google Analytics) to understand overall site traffic and improve the tool. This data does not personally identify you.</p>
-    <p>If you have any questions about this Privacy Policy, please reach out via the Contact section below.</p>
+    <p>If you have any questions about this Privacy Policy, please reach out via our <a href="mailto:hagarwal193@gmail.com" style="color:var(--indigo-soft);">Contact page</a>.</p>
   </section>
 
   <section id="terms" class="sc-reveal" style="margin-bottom:56px;">
@@ -3761,7 +3829,7 @@ const SA_IC = {
 const saIc = (k, s) => '<svg class="ic" width="' + (s || 24) + '" height="' + (s || 24) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + SA_IC[k] + '</svg>';
 
 
-const SA_PAGES = { guide: 1, faq: 1, about: 1, privacy: 1, terms: 1 };
+const SA_PAGES = { guide: 1, faq: 1, about: 1, contact: 1, privacy: 1, terms: 1 };
 const saLogo = '<img class="sa-logo" src="' + LOGO_SQUARE + '" alt="Salary Analyzer logo" width="48" height="48">';
 const saBrand = '<span class="brand-txt"><span class="brand-name">Salary Analyzer</span><span class="brand-tag">Salary analysis at your fingertips</span></span>';
 function saLiLogo(s) {
@@ -3790,6 +3858,7 @@ function saHeader(li, active) {
     <a href="#preview" data-go="landing" data-scroll="preview">Salary Reports</a>
     ${saDD('Resources', '<button type="button" data-go="guide"><b>Salary Guide</b><small>CTC &amp; in-hand explained</small></button><button type="button" data-go="faq"><b>FAQ</b><small>Common questions</small></button><button type="button" data-go="privacy"><b>Privacy Policy</b></button><button type="button" data-go="terms"><b>Terms &amp; Conditions</b></button>', active === 'guide' || active === 'faq' || active === 'privacy' || active === 'terms')}
     <button type="button" class="navbtn${active === 'about' ? ' on' : ''}" data-go="about">About Us</button>
+    <button type="button" class="navbtn${active === 'contact' ? ' on' : ''}" data-go="contact">Contact</button>
     ${saLi(li, 'li-link navli', saLiLogo(24) + '<span>Follow on LinkedIn</span>')}
   </nav>
   <div class="head-r">
@@ -3810,7 +3879,7 @@ function saFooter(li) {
     </div>
     ${col('Calculators', [['Smart Salary Builder', 'ctc'], ['Custom Salary Builder', 'manual'], ['Labour Code Mode', 'labour']])}
     ${col('Explore', [['Home', 'landing', 'sa-top'], ['Salary Reports', 'landing', 'preview'], ['Salary Guide', 'guide'], ['FAQ', 'faq']])}
-    ${col('Company', [['About Us', 'about'], ['Privacy Policy', 'privacy'], ['Terms &amp; Conditions', 'terms']])}
+    ${col('Company', [['About Us', 'about'], ['Contact', 'contact'], ['Privacy Policy', 'privacy'], ['Terms &amp; Conditions', 'terms']])}
   </div>
   <div class="foot-bar"><p>© 2026 Salary Analyzer. All rights reserved.</p><p>Designed &amp; developed by <a href="${PORTFOLIO_URL}" target="_blank" rel="noopener noreferrer">Harsh Agarwal</a></p></div>
 </div></footer>`;
@@ -4047,11 +4116,14 @@ SA_IC.help = '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5
 SA_IC.book = '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M9 7h6"/>';
 SA_IC.lock = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
 SA_IC.plus = '<path d="M12 5v14M5 12h14"/>';
+SA_IC.mail = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>';
+SA_IC.clock = '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>';
 
 const SA_PG = {
   guide: { crumb: 'Salary Guide', ic: 'book', g: 'g-guide', sub: 'A plain-English guide to CTC, deductions and the salary that actually reaches your bank account.', title: 'Salary Guide – CTC & In-Hand Salary | Salary Analyzer' },
   faq: { crumb: 'FAQ', ic: 'help', g: 'g-faq', sub: 'Quick answers about CTC, in-hand salary, PF, LWF and how Salary Analyzer works.', title: 'FAQ – Salary Analyzer' },
   about: { crumb: 'About Us', ic: 'users', g: 'g-about', sub: 'A free tool that removes the guesswork from Indian salary structuring.', title: 'About Us – Salary Analyzer' },
+  contact: { crumb: 'Contact', ic: 'help', g: 'g-about', sub: 'Questions, bug reports or feature ideas — we would love to hear from you.', title: 'Contact Us – Salary Analyzer' },
   privacy: { crumb: 'Privacy Policy', ic: 'shield', g: 'g-priv', sub: 'How Salary Analyzer handles your information.', title: 'Privacy Policy – Salary Analyzer' },
   terms: { crumb: 'Terms & Conditions', ic: 'file', g: 'g-terms', sub: 'The ground rules for using Salary Analyzer.', title: 'Terms & Conditions – Salary Analyzer' }
 };
@@ -4083,6 +4155,26 @@ function saPageBody(page, sec) {
     body = `<div class="wrap pg-body"><div class="ab-lay"><article class="ab-story"><p class="ab-lead">${ps[0] || ''}</p>${ps.slice(1).map(p => '<p>' + p + '</p>').join('')}</article>
       <aside class="ab-dev"><span class="dev-av">HA</span><h2>Harsh Agarwal</h2><p>Designer &amp; developer of Salary Analyzer</p><div class="dev-links">${saExt(LINKEDIN_PERSONAL, saLiLogo(22), 'Connect on LinkedIn', '')}${saExt(PORTFOLIO_URL, saPfLogo(22), 'View Portfolio', '')}${saExt(LINKEDIN_URL, saLiLogo(22), 'Follow Salary Analyzer', '')}</div></aside></div>
       <div class="ab-grid">${st.map((s, i) => `<article class="card ab-t c${i + 1}"><h3>${s.t}</h3><p>${s.d}</p></article>`).join('')}</div></div>`;
+  } else if (page === 'contact') {
+    const topics = [
+      { t: 'Bug or calculation error', d: 'Found a mismatch between your payslip and the calculator? Tell us your state, CTC and what you expected — we check every report.' },
+      { t: 'Privacy or data question', d: 'Questions about how this site handles your information are answered personally, usually within a day or two.' },
+      { t: 'Feature request', d: 'Missing a state, a deduction, or an export format you need? Suggestions directly shape the roadmap.' },
+      { t: 'Press, partnerships or other', d: "Anything that doesn't fit the categories above — just write in and we'll point you in the right direction." }
+    ];
+    body = `<div class="wrap pg-body">
+      <ul class="glance"><li>${saIc('clock', 22)}<span>Reply within 2–3 business days</span></li><li>${saIc('mail', 22)}<span>Direct email, no ticketing system</span></li><li>${saIc('user', 22)}<span>Read &amp; answered personally</span></li></ul>
+      <div class="ab-grid" style="margin-bottom:28px;">${topics.map((x, i) => `<article class="card ab-t c${(i % 4) + 1}"><h3>${x.t}</h3><p>${x.d}</p></article>`).join('')}</div>
+      <aside class="ab-dev" style="max-width:520px;margin:0 auto;text-align:center;">
+        <span class="dev-av">${saIc('mail', 28)}</span>
+        <h2>hagarwal193@gmail.com</h2>
+        <p>Send your question anytime — every message is read and answered personally.</p>
+        <div class="dev-links" style="justify-content:center;margin-top:14px;">
+          <a class="soc-a" href="mailto:hagarwal193@gmail.com">${saIc('mail', 20)}<span>Write an email</span></a>
+          ${saExt(LINKEDIN_PERSONAL, saLiLogo(22), 'Connect on LinkedIn', '')}
+        </div>
+      </aside>
+    </div>`;
   } else if (page === 'privacy') {
     const ps = [].slice.call(sec.querySelectorAll(':scope > p'));
     let updated = '';
