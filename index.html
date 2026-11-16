@@ -860,21 +860,17 @@
 <div id="root"></div>
 <div id="printSlip"></div>
 
-<!-- ============================================================
-     STATIC SITE CONTENT (article, FAQ, About, Privacy, Terms, Contact)
-     Added for AdSense policy compliance: real, original publisher
-     content alongside the calculator tool.
-     ============================================================ -->
 <div id="site-content" style="max-width:880px;margin:0 auto;padding:56px 20px 80px 20px;color:var(--ink-dim);font-family:var(--font-sans);line-height:1.75;font-size:15px;">
   <h2 class="font-display" style="color:var(--ink);font-size:26px;text-align:center;margin:0 0 6px 0;">Salary Guide, FAQ &amp; Site Information</h2>
   <p style="text-align:center;margin-bottom:26px;">Everything about CTC, in-hand salary, deductions, our policies and how to reach us.</p>
 
-  <nav style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center;margin-bottom:40px;font-family:var(--font-mono);font-size:12px;letter-spacing:0.06em;text-transform:uppercase;">
-    <a href="#guide" style="color:var(--ink-faint);text-decoration:none;">Salary Guide</a>
-    <a href="#faq" style="color:var(--ink-faint);text-decoration:none;">FAQ</a>
-    <a href="#about" style="color:var(--ink-faint);text-decoration:none;">About Us</a>
-    <a href="#privacy" style="color:var(--ink-faint);text-decoration:none;">Privacy Policy</a>
-    <a href="#terms" style="color:var(--ink-faint);text-decoration:none;">Terms</a>
+  <nav aria-label="Site pages" style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center;margin-bottom:40px;font-family:var(--font-mono);font-size:12px;letter-spacing:0.06em;text-transform:uppercase;">
+    <a href="/guide.html" style="color:var(--ink-faint);text-decoration:none;">Salary Guide</a>
+    <a href="/faq.html" style="color:var(--ink-faint);text-decoration:none;">FAQ</a>
+    <a href="/about.html" style="color:var(--ink-faint);text-decoration:none;">About Us</a>
+    <a href="/contact.html" style="color:var(--ink-faint);text-decoration:none;">Contact</a>
+    <a href="/privacy-policy.html" style="color:var(--ink-faint);text-decoration:none;">Privacy Policy</a>
+    <a href="/terms.html" style="color:var(--ink-faint);text-decoration:none;">Terms</a>
   </nav>
 
   <!-- QUICK STAT CARDS -->
@@ -3887,9 +3883,9 @@ function saHeader(li, active) {
     ${saDD('Calculators', '<button type="button" data-go="ctc"><b>Smart Salary Builder</b><small>As per Old Labour Law</small></button><button type="button" data-go="labour"><b>Labour Code Mode</b><small>As per New Labour Code</small></button><button type="button" data-go="manual"><b>Custom Salary Builder</b><small>HR can edit · New Labour Law</small></button>')}
     <button type="button" class="navbtn" data-go="labour">Labour Code</button>
     <a href="#preview" data-go="landing" data-scroll="preview">Salary Reports</a>
-    ${saDD('Resources', '<button type="button" data-go="guide"><b>Salary Guide</b><small>CTC &amp; in-hand explained</small></button><button type="button" data-go="faq"><b>FAQ</b><small>Common questions</small></button><button type="button" data-go="privacy"><b>Privacy Policy</b></button><button type="button" data-go="terms"><b>Terms &amp; Conditions</b></button>', active === 'guide' || active === 'faq' || active === 'privacy' || active === 'terms')}
-    <a href="#about" class="navbtn${active === 'about' ? ' on' : ''}" data-go="about" style="text-decoration:none">About Us</a>
-    <a href="#contact" class="navbtn${active === 'contact' ? ' on' : ''}" data-go="contact" style="text-decoration:none">Contact</a>
+    ${saDD('Resources', '<a href="/guide.html"><b>Salary Guide</b><small>CTC &amp; in-hand explained</small></a><a href="/faq.html"><b>FAQ</b><small>Common questions</small></a><a href="/privacy-policy.html"><b>Privacy Policy</b></a><a href="/terms.html"><b>Terms &amp; Conditions</b></a>', active === 'guide' || active === 'faq' || active === 'privacy' || active === 'terms')}
+    <a href="/about.html" class="navbtn${active === 'about' ? ' on' : ''}" style="text-decoration:none">About Us</a>
+    <a href="/contact.html" class="navbtn${active === 'contact' ? ' on' : ''}" style="text-decoration:none">Contact</a>
     ${saLi(li, 'li-link navli', saLiLogo(24) + '<span>Follow on LinkedIn</span>')}
   </nav>
   <div class="head-r">
@@ -3900,8 +3896,8 @@ function saHeader(li, active) {
 </div></header>`;
 }
 function saFooter(li) {
-  const SA_URL = { guide: '#guide', faq: '#faq', about: '#about', contact: '#contact', privacy: '#privacy', terms: '#terms' };
-  const col = (h, items) => '<div class="fcol"><h2>' + h + '</h2><ul>' + items.map(i => SA_URL[i[1]] ? '<li><a href="' + SA_URL[i[1]] + '" data-go="' + i[1] + '">' + i[0] + '</a></li>' : '<li><button type="button" data-go="' + i[1] + '"' + (i[2] ? ' data-scroll="' + i[2] + '"' : '') + '>' + i[0] + '</button></li>').join('') + '</ul></div>';
+  const SA_URL = {'guide': '/guide.html', 'faq': '/faq.html', 'about': '/about.html', 'contact': '/contact.html', 'privacy': '/privacy-policy.html', 'terms': '/terms.html'};
+  const col = (h, items) => '<div class="fcol"><h2>' + h + '</h2><ul>' + items.map(i => SA_URL[i[1]] ? '<li><a href="' + SA_URL[i[1]] + '">' + i[0] + '</a></li>' : '<li><button type="button" data-go="' + i[1] + '"' + (i[2] ? ' data-scroll="' + i[2] + '"' : '') + '>' + i[0] + '</button></li>').join('') + '</ul></div>';
   return `<footer class="sa-foot"><div class="wrap">
   <div class="foot-grid">
     <div class="fbrand">
